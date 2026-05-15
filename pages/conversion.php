@@ -4,7 +4,7 @@ $base_path  = '../';
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters ──────────────────────────────────────────────────────────────────
-$f_date     = $_GET['date']     ?? '';
+$f_month    = $_GET['month']    ?? '';   // format: "M/YYYY" e.g. "3/2026"
 $f_machine  = $_GET['machine']  ?? '';
 $f_customer = $_GET['customer'] ?? '';
 $f_fabric   = $_GET['fabric']   ?? '';
@@ -15,7 +15,14 @@ $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_date)     { $where[] = 'DATE_STARTED = ?';               $params[] = $f_date;     $types .= 's'; }
+// Monthly filter: DATE_STARTED is stored as M/D/YYYY so match M/%/YYYY
+if ($f_month) {
+    list($fm, $fy) = explode('/', $f_month, 2);
+    $where[] = "MONTH(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=?";
+    $params[] = (int)$fm;   
+    $params[] = (int)$fy;   
+    $types .= 'ss';
+}
 if ($f_machine)  { $where[] = 'MACINE_NUMBER = ?';              $params[] = $f_machine;  $types .= 's'; }
 if ($f_customer) { $where[] = 'INPUT_CUSTOMER = ?';             $params[] = $f_customer; $types .= 's'; }
 if ($f_fabric)   { $where[] = 'FABRIC_WIDTH_TAPE_DENIER = ?';   $params[] = $f_fabric;   $types .= 's'; }
@@ -100,6 +107,20 @@ $c_customer = chart_data($conn,
     $types, $params, 'k', 'v1');
 
 // ── Filter options ────────────────────────────────────────────────────────────
+// Build distinct month/year options from DATE_STARTED (format M/D/YYYY)
+$opt_months_raw = $conn->query("SELECT DISTINCT DATE_STARTED FROM welding WHERE DATE_STARTED IS NOT NULL AND DATE_STARTED != '' ORDER BY DATE_STARTED");
+$opt_months = [];
+while ($om = $opt_months_raw->fetch_assoc()) {
+    $parts = explode('/', $om['DATE_STARTED']);
+    if (count($parts) === 3) {
+        $key = $parts[0] . '/' . $parts[2]; // M/YYYY
+        $label = date('F Y', mktime(0,0,0,(int)$parts[0],1,(int)$parts[2]));
+        $opt_months[$key] = $label;
+    }
+}
+// Sort by year then month
+uksort($opt_months, function($a,$b){ list($am,$ay)=explode('/',$a); list($bm,$by)=explode('/',$b); return $ay!=$by?$ay-$by:$am-$bm; });
+
 $opt_machines  = $conn->query("SELECT DISTINCT MACINE_NUMBER v FROM welding WHERE MACINE_NUMBER IS NOT NULL AND MACINE_NUMBER != '' ORDER BY MACINE_NUMBER");
 $opt_customers = $conn->query("SELECT DISTINCT INPUT_CUSTOMER v FROM welding WHERE INPUT_CUSTOMER IS NOT NULL AND INPUT_CUSTOMER != '' ORDER BY INPUT_CUSTOMER");
 $opt_fabrics   = $conn->query("SELECT DISTINCT FABRIC_WIDTH_TAPE_DENIER v FROM welding WHERE FABRIC_WIDTH_TAPE_DENIER IS NOT NULL AND FABRIC_WIDTH_TAPE_DENIER != '' ORDER BY FABRIC_WIDTH_TAPE_DENIER");
@@ -146,9 +167,15 @@ require_once __DIR__ . '/../includes/navbar.php';
         <div class="section-title mb-3"><i class="bi bi-funnel"></i> Filters</div>
         <form method="GET" class="row g-2 align-items-end">
             <div class="col-6 col-md-3 col-lg-2">
-                <label class="form-label text-secondary" style="font-size:.72rem">DATE STARTED</label>
-                <input type="text" name="date" class="form-control form-control-sm pqm-input"
-                       placeholder="e.g. 3/3/2026" value="<?= htmlspecialchars($f_date) ?>">
+                <label class="form-label text-secondary" style="font-size:.72rem">MONTH</label>
+                <select name="month" class="form-select form-select-sm pqm-input">
+                    <option value="">All Months</option>
+                    <?php foreach ($opt_months as $mv => $ml): ?>
+                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_month===$mv?'selected':'' ?>>
+                        <?= htmlspecialchars($ml) ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE NUMBER</label>

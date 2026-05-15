@@ -6,7 +6,7 @@
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters (same as main page) ───────────────────────────────────────────────
-$f_date    = $_GET['date']    ?? '';
+$f_month   = $_GET['month']   ?? '';
 $f_machine = $_GET['machine'] ?? '';
 $f_shift   = $_GET['shift']   ?? '';
 $f_line    = $_GET['line']    ?? '';
@@ -15,7 +15,13 @@ $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_date)    { $where[] = 'Date_Harvested = ?';  $params[] = $f_date;    $types .= 's'; }
+if ($f_month) {
+    list($fm, $fy) = explode('/', $f_month, 2);
+    $where[] = "MONTH(STR_TO_DATE(Date_Harvested,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(Date_Harvested,'%m/%d/%Y'))=?";
+    $params[] = (int)$fm;
+    $params[] = (int)$fy;
+    $types .= 'ss';
+}
 if ($f_machine) { $where[] = '`Machine_NO.` = ?';   $params[] = $f_machine; $types .= 's'; }
 if ($f_shift)   { $where[] = 'Shift = ?';            $params[] = $f_shift;   $types .= 's'; }
 if ($f_line)    { $where[] = 'Line = ?';             $params[] = $f_line;    $types .= 's'; }

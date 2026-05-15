@@ -6,7 +6,7 @@
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters (same as main page) ───────────────────────────────────────────────
-$f_date     = $_GET['date']     ?? '';
+$f_month    = $_GET['month']    ?? '';
 $f_machine  = $_GET['machine']  ?? '';
 $f_shift    = $_GET['shift']    ?? '';
 $f_bag_type = $_GET['bag_type'] ?? '';
@@ -18,7 +18,13 @@ $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_date)     { $where[] = 'ENCODING_DATE = ?';              $params[] = $f_date;             $types .= 's'; }
+if ($f_month) {
+    list($fm, $fy) = explode('/', $f_month, 2);
+    $where[] = "MONTH(STR_TO_DATE(ENCODING_DATE,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(ENCODING_DATE,'%m/%d/%Y'))=?";
+    $params[] = (int)$fm;
+    $params[] = (int)$fy;
+    $types .= 'ss';
+}
 if ($f_machine)  { $where[] = 'MACHIN_NUMBER = ?';              $params[] = $f_machine;          $types .= 's'; }
 if ($f_shift)    { $where[] = 'SHIFT_PRODUCTION_PERSONNEL LIKE ?'; $params[] = '%'.$f_shift.'%'; $types .= 's'; }
 if ($f_bag_type) { $where[] = 'BAG_TYPE LIKE ?';                $params[] = '%'.$f_bag_type.'%'; $types .= 's'; }

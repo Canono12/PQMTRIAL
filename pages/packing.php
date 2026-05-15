@@ -20,16 +20,16 @@ $conn->query("CREATE TABLE IF NOT EXISTS `packing` (
     `Encoded_By` varchar(50) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
-$f_date     = $_GET['date']     ?? '';
+$f_month    = $_GET['month']    ?? '';
 $f_machine  = $_GET['machine']  ?? '';
 $f_shift    = $_GET['shift']    ?? '';
 $f_customer = $_GET['customer'] ?? '';
 
 $where=['1=1'];$params=[];$types='';
-if($f_date)    {$where[]='`Date`=?';      $params[]=$f_date;     $types.='s';}
-if($f_machine) {$where[]='`Machine_No`=?';$params[]=$f_machine;  $types.='s';}
-if($f_shift)   {$where[]='`Shift`=?';     $params[]=$f_shift;    $types.='s';}
-if($f_customer){$where[]='`Customer`=?';  $params[]=$f_customer; $types.='s';}
+if($f_month)   {$where[]='`Date` LIKE ?';     $params[]=$f_month.'%'; $types.='s';}
+if($f_machine) {$where[]='`Machine_No`=?';    $params[]=$f_machine;   $types.='s';}
+if($f_shift)   {$where[]='`Shift`=?';         $params[]=$f_shift;     $types.='s';}
+if($f_customer){$where[]='`Customer`=?';      $params[]=$f_customer;  $types.='s';}
 $wsql=implode(' AND ',$where);
 
 function pkqry($conn,$sql,$t='',$p=[]){
@@ -65,6 +65,16 @@ if($has_data){
     $c_prod_labels=json_encode($pl);$c_prod_qty=json_encode($pq);
 }
 
+$opt_months_raw = $conn->query("SELECT DISTINCT LEFT(`Date`,7) AS ym FROM packing WHERE `Date` IS NOT NULL AND `Date` != '' AND `Date` REGEXP '^[0-9]{4}-[0-9]{2}' ORDER BY ym");
+$opt_months = [];
+while ($om = $opt_months_raw->fetch_assoc()) {
+    $ym = $om['ym'];
+    if (strlen($ym) === 7) {
+        list($y,$m) = explode('-', $ym);
+        $opt_months[$ym] = date('F Y', mktime(0,0,0,(int)$m,1,(int)$y));
+    }
+}
+
 $opt_machines =$conn->query("SELECT DISTINCT Machine_No v FROM packing ORDER BY Machine_No");
 $opt_shifts   =$conn->query("SELECT DISTINCT Shift v FROM packing ORDER BY Shift");
 $opt_customers=$conn->query("SELECT DISTINCT Customer v FROM packing ORDER BY Customer");
@@ -97,8 +107,13 @@ require_once __DIR__.'/../includes/navbar.php';
   <!-- Filters -->
   <form method="GET" class="pqm-card mb-4">
     <div class="row g-2 align-items-end">
-      <div class="col-sm-2"><label class="filter-label">Date</label>
-        <input type="date" name="date" value="<?=htmlspecialchars($f_date)?>" class="form-control form-control-sm pqm-input"></div>
+      <div class="col-sm-2"><label class="filter-label">Month</label>
+        <select name="month" class="form-select form-select-sm pqm-input">
+          <option value="">All Months</option>
+          <?php foreach ($opt_months as $mv => $ml): ?>
+          <option value="<?=htmlspecialchars($mv)?>" <?=$f_month===$mv?'selected':''?>><?=htmlspecialchars($ml)?></option>
+          <?php endforeach; ?>
+        </select></div>
       <div class="col-sm-3"><label class="filter-label">Machine</label>
         <select name="machine" class="form-select form-select-sm pqm-input"><option value="">All</option>
           <?php while($o=$opt_machines->fetch_assoc()):?><option value="<?=htmlspecialchars($o['v'])?>" <?=$f_machine===$o['v']?'selected':''?>><?=htmlspecialchars($o['v'])?></option><?php endwhile;?>

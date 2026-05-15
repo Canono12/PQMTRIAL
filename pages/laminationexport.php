@@ -6,17 +6,21 @@
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters (same as main page) ───────────────────────────────────────────────
-$f_date_from = $_GET['date_from'] ?? '';
-$f_date_to   = $_GET['date_to']   ?? '';
-$f_machine   = $_GET['machine']   ?? '';
-$f_rm        = $_GET['rm']        ?? '';
+$f_month   = $_GET['month']   ?? '';
+$f_machine = $_GET['machine'] ?? '';
+$f_rm      = $_GET['rm']      ?? '';
 
 $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_date_from) { $where[] = 'DATE_STARTED >= ?';  $params[] = $f_date_from; $types .= 's'; }
-if ($f_date_to)   { $where[] = 'DATE_STARTED <= ?';  $params[] = $f_date_to;   $types .= 's'; }
+if ($f_month) {
+    list($fm, $fy) = explode('/', $f_month, 2);
+    $where[] = "MONTH(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=?";
+    $params[] = (int)$fm;
+    $params[] = (int)$fy;
+    $types .= 'ss';
+}
 if ($f_machine)   { $where[] = 'machine_number = ?';  $params[] = $f_machine;  $types .= 's'; }
 if ($f_rm) {
     $where[] = '(PP LIKE ? OR CALCIUM_CARBONATE_1 LIKE ? OR CALCIUM_CARBONATE_2 LIKE ?)';

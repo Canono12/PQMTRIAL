@@ -6,7 +6,7 @@
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters (same as main page) ───────────────────────────────────────────────
-$f_date    = $_GET['date']    ?? '';
+$f_month   = $_GET['month']   ?? '';
 $f_machine = $_GET['machine'] ?? '';
 $f_shift   = $_GET['shift']   ?? '';
 $f_fabric  = $_GET['fabric']  ?? '';
@@ -17,7 +17,13 @@ $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_date)    { $where[] = 'DATE_STARTED = ?';                  $params[] = $f_date;    $types .= 's'; }
+if ($f_month) {
+    list($fm, $fy) = explode('/', $f_month, 2);
+    $where[] = "MONTH(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=?";
+    $params[] = (int)$fm;
+    $params[] = (int)$fy;
+    $types .= 'ss';
+}
 if ($f_machine) { $where[] = 'MACHINE_NUMBER = ?';                $params[] = $f_machine; $types .= 's'; }
 if ($f_shift)   { $where[] = 'PRINTED_FABRIC = ?';                $params[] = $f_shift;   $types .= 's'; }
 if ($f_fabric)  { $where[] = 'FABRIC_WIDTH_AND_TAPE_DENIER = ?';  $params[] = $f_fabric;  $types .= 's'; }

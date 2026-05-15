@@ -4,18 +4,25 @@ $base_path  = '../';
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters ───────────────────────────────────────────────────────────────────
-$f_date_from = $_GET['date_from']  ?? '';
-$f_date_to   = $_GET['date_to']    ?? '';
-$f_machine   = $_GET['machine']    ?? '';
-$f_shift     = $_GET['shift']      ?? '';
-$f_rm        = $_GET['rm']         ?? '';
+$f_month   = $_GET['month']    ?? '';
+$f_machine = $_GET['machine']  ?? '';
+$f_shift   = $_GET['shift']    ?? '';
+$f_rm      = $_GET['rm']       ?? '';
 
 $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_date_from) { $where[] = 'DATE_STARTED >= ?'; $params[] = $f_date_from; $types .= 's'; }
-if ($f_date_to)   { $where[] = 'DATE_STARTED <= ?'; $params[] = $f_date_to;   $types .= 's'; }
+if ($f_month) {
+    list($fm, $fy) = explode('/', $f_month, 2);
+    $where[] = "MONTH(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=?";
+    $params[] = (int)$fm;
+    $params[] = (int)$fy;
+    $types .= 'ss';
+}
+$f_shift     = $_GET['shift']      ?? '';
+$f_rm        = $_GET['rm']         ?? '';
+
 if ($f_machine)   { $where[] = 'machine_number = ?'; $params[] = $f_machine;  $types .= 's'; }
 if ($f_rm) {
     // RM filter covers PP and CC columns
@@ -129,6 +136,18 @@ while ($row = $c_trend->fetch_assoc()) {
 }
 
 // ── Filter options ────────────────────────────────────────────────────────────
+$opt_months_raw = $conn->query("SELECT DISTINCT DATE_STARTED FROM laminationimport_fixed WHERE DATE_STARTED IS NOT NULL AND DATE_STARTED != '' ORDER BY DATE_STARTED");
+$opt_months = [];
+while ($om = $opt_months_raw->fetch_assoc()) {
+    $parts = explode('/', $om['DATE_STARTED']);
+    if (count($parts) === 3) {
+        $key = $parts[0] . '/' . $parts[2];
+        $label = date('F Y', mktime(0,0,0,(int)$parts[0],1,(int)$parts[2]));
+        $opt_months[$key] = $label;
+    }
+}
+uksort($opt_months, function($a,$b){ list($am,$ay)=explode('/',$a); list($bm,$by)=explode('/',$b); return $ay!=$by?$ay-$by:$am-$bm; });
+
 $opt_machines = $conn->query("SELECT DISTINCT machine_number v FROM laminationimport_fixed WHERE machine_number IS NOT NULL AND machine_number != '' ORDER BY machine_number");
 $opt_pp       = $conn->query("SELECT DISTINCT PP v FROM laminationimport_fixed WHERE PP IS NOT NULL AND PP != '' ORDER BY PP");
 
@@ -174,14 +193,15 @@ require_once __DIR__ . '/../includes/navbar.php';
         <div class="section-title mb-3"><i class="bi bi-funnel"></i> Filters</div>
         <form method="GET" class="row g-2 align-items-end">
             <div class="col-6 col-md-3 col-lg-2">
-                <label class="form-label text-secondary" style="font-size:.72rem">DATE FROM</label>
-                <input type="text" name="date_from" class="form-control form-control-sm pqm-input lam-input"
-                       placeholder="e.g. 3/23/2026" value="<?= htmlspecialchars($f_date_from) ?>">
-            </div>
-            <div class="col-6 col-md-3 col-lg-2">
-                <label class="form-label text-secondary" style="font-size:.72rem">DATE TO</label>
-                <input type="text" name="date_to" class="form-control form-control-sm pqm-input lam-input"
-                       placeholder="e.g. 3/30/2026" value="<?= htmlspecialchars($f_date_to) ?>">
+                <label class="form-label text-secondary" style="font-size:.72rem">MONTH</label>
+                <select name="month" class="form-select form-select-sm pqm-input lam-input">
+                    <option value="">All Months</option>
+                    <?php foreach ($opt_months as $mv => $ml): ?>
+                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_month===$mv?'selected':'' ?>>
+                        <?= htmlspecialchars($ml) ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE</label>
