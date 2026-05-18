@@ -4,8 +4,10 @@ $base_path  = '../';
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters ──────────────────────────────────────────────────────────────────
-$f_month    = $_GET['month']    ?? '';   // M/YYYY
-$f_machine  = $_GET['machine']  ?? '';
+$f_monthyear = $_GET['monthyear'] ?? '';
+$f_date_from = $_GET['date_from'] ?? '';
+$f_date_to   = $_GET['date_to']   ?? '';
+$f_machines = array_filter(array_map('trim', (array)($_GET['machine'] ?? [])));
 $f_shift    = $_GET['shift']    ?? '';
 $f_bag_type = $_GET['bag_type'] ?? '';
 $f_fabric   = $_GET['fabric']   ?? '';
@@ -16,19 +18,32 @@ $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_month) {
-    list($fm, $fy) = explode('/', $f_month, 2);
-    $where[] = "MONTH(STR_TO_DATE(ENCODING_DATE,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(ENCODING_DATE,'%m/%d/%Y'))=?";
-    $params[] = (int)$fm;
-    $params[] = (int)$fy;
-    $types .= 'ss';
+if ($f_monthyear) {
+    $where[] = "DATE_FORMAT(DATE_FINISHED, '%Y-%m') = ?";
+    $params[] = $f_monthyear;
+    $types .= 's';
 }
-if ($f_machine)  { $where[] = 'MACHIN_NUMBER = ?';              $params[] = $f_machine;  $types .= 's'; }
-if ($f_shift)    { $where[] = 'SHIFT_PRODUCTION_PERSONNEL LIKE ?'; $params[] = '%'.$f_shift.'%'; $types .= 's'; }
-if ($f_bag_type) { $where[] = 'BAG_TYPE LIKE ?';                $params[] = '%'.$f_bag_type.'%'; $types .= 's'; }
-if ($f_fabric)   { $where[] = 'FABRIC_WIDTH_TAPE_DENIER = ?';  $params[] = $f_fabric;   $types .= 's'; }
-if ($f_jo)       { $where[] = 'JOB_ORDER_NUMBER = ?';           $params[] = $f_jo;       $types .= 's'; }
-if ($f_customer) { $where[] = 'CUSTOMER = ?';                   $params[] = $f_customer; $types .= 's'; }
+if ($f_date_from) {
+    $where[] = "DATE_FINISHED >= ?";
+    $params[] = $f_date_from;
+    $types .= 's';
+}
+if ($f_date_to) {
+    $where[] = "DATE_FINISHED <= ?";
+    $params[] = $f_date_to;
+    $types .= 's';
+}
+if (!empty($f_machines)) {
+    $placeholders = implode(',', array_fill(0, count($f_machines), '?'));
+    $where[] = "MACHIN_NUMBER IN ($placeholders)";
+    foreach ($f_machines as $m) { $params[] = $m; $types .= 's'; }
+}
+if ($f_shift)    { $where[] = 'SHIFT_PRODUCTION_PERSONNEL LIKE ?';  $params[] = '%'.$f_shift.'%'; $types .= 's'; }
+if ($f_bag_type) { $where[] = 'BAG_TYPE LIKE ?';                    $params[] = '%'.$f_bag_type.'%'; $types .= 's'; }
+if ($f_fabric)   { $where[] = 'FABRIC_WIDTH_TAPE_DENIER = ?';      $params[] = $f_fabric;   $types .= 's'; }
+if ($f_jo)       { $where[] = 'JOB_ORDER_NUMBER = ?';               $params[] = $f_jo;       $types .= 's'; }
+if ($f_customer) { $where[] = 'CUSTOMER = ?';                       $params[] = $f_customer; $types .= 's'; }
+$wsql = implode(' AND ', $where);
 $wsql = implode(' AND ', $where);
 
 function qry($conn, $sql, $t = '', $p = []) {
@@ -123,18 +138,11 @@ $c_customer = chart_data_two($conn,
     $types, $params, 'k', 'v1', 'v2');
 
 // ── Filter option lists ───────────────────────────────────────────────────────
-$opt_months_raw = $conn->query("SELECT DISTINCT ENCODING_DATE FROM ctswtrial WHERE ENCODING_DATE IS NOT NULL AND ENCODING_DATE != '' ORDER BY ENCODING_DATE");
+$opt_months_raw = $conn->query("SELECT DISTINCT DATE_FORMAT(DATE_FINISHED,'%Y-%m') AS v, DATE_FORMAT(DATE_FINISHED,'%M %Y') AS label FROM ctswtrial WHERE DATE_FINISHED IS NOT NULL AND DATE_FINISHED != '' AND DATE_FINISHED != '0000-00-00' ORDER BY v DESC");
 $opt_months = [];
 while ($om = $opt_months_raw->fetch_assoc()) {
-    $parts = explode('/', $om['ENCODING_DATE']);
-    if (count($parts) === 3) {
-        $key = $parts[0] . '/' . $parts[2];
-        $label = date('F Y', mktime(0,0,0,(int)$parts[0],1,(int)$parts[2]));
-        $opt_months[$key] = $label;
-    }
+    if ($om['v']) $opt_months[$om['v']] = $om['label'];
 }
-uksort($opt_months, function($a,$b){ list($am,$ay)=explode('/',$a); list($bm,$by)=explode('/',$b); return $ay!=$by?$ay-$by:$am-$bm; });
-
 $opt_machines  = $conn->query("SELECT DISTINCT MACHIN_NUMBER v FROM ctswtrial WHERE MACHIN_NUMBER IS NOT NULL ORDER BY MACHIN_NUMBER");
 $opt_fabrics   = $conn->query("SELECT DISTINCT FABRIC_WIDTH_TAPE_DENIER v FROM ctswtrial WHERE FABRIC_WIDTH_TAPE_DENIER IS NOT NULL ORDER BY FABRIC_WIDTH_TAPE_DENIER");
 $opt_jo        = $conn->query("SELECT DISTINCT JOB_ORDER_NUMBER v FROM ctswtrial WHERE JOB_ORDER_NUMBER IS NOT NULL AND JOB_ORDER_NUMBER != 'N/A' ORDER BY JOB_ORDER_NUMBER");
@@ -183,25 +191,57 @@ require_once __DIR__ . '/../includes/navbar.php';
         <form method="GET" class="row g-2 align-items-end">
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MONTH</label>
-                <select name="month" class="form-select form-select-sm pqm-input">
+                <select name="monthyear" class="form-select form-select-sm pqm-input">
                     <option value="">All Months</option>
                     <?php foreach ($opt_months as $mv => $ml): ?>
-                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_month===$mv?'selected':'' ?>>
+                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_monthyear===$mv?'selected':'' ?>>
                         <?= htmlspecialchars($ml) ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
             </div>
+
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED FROM</label>
+                <input type="date" name="date_from" class="form-control form-control-sm pqm-input"
+                       value="<?= htmlspecialchars($f_date_from) ?>">
+            </div>
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED TO</label>
+                <input type="date" name="date_to" class="form-control form-control-sm pqm-input"
+                       value="<?= htmlspecialchars($f_date_to) ?>">
+            </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE</label>
-                <select name="machine" class="form-select form-select-sm pqm-input">
-                    <option value="">All Machines</option>
-                    <?php while ($o = $opt_machines->fetch_assoc()): ?>
-                    <option value="<?= htmlspecialchars($o['v']) ?>" <?= $f_machine===$o['v']?'selected':'' ?>>
-                        <?= htmlspecialchars($o['v']) ?>
-                    </option>
-                    <?php endwhile; ?>
-                </select>
+                <div class="ctsw-multi-wrap" id="ctswMachineWrap">
+                    <button type="button" class="ctsw-multi-btn pqm-input" id="ctswMachineBtn">
+                        <span id="ctswMachineLabel">
+                            <?php if (!empty($f_machines)): ?>
+                                <?= count($f_machines) === 1 ? htmlspecialchars($f_machines[0]) : count($f_machines) . ' machines selected' ?>
+                            <?php else: ?>All Machines<?php endif; ?>
+                        </span>
+                        <i class="bi bi-chevron-down" style="font-size:.7rem;margin-left:auto;opacity:.6"></i>
+                    </button>
+                    <div class="ctsw-multi-panel" id="ctswMachinePanel">
+                        <label class="ctsw-multi-opt">
+                            <input type="checkbox" id="ctswMachineAll" class="ctsw-cb">
+                            <span style="color:#94a3b8;font-style:italic">All Machines</span>
+                        </label>
+                        <div style="border-top:1px solid rgba(255,255,255,.07);margin:3px 0"></div>
+                        <?php
+                        $machines_list = [];
+                        while ($o = $opt_machines->fetch_assoc()) $machines_list[] = $o['v'];
+                        foreach ($machines_list as $mv):
+                            $checked = in_array((string)$mv, array_map('strval', $f_machines)) ? 'checked' : '';
+                        ?>
+                        <label class="ctsw-multi-opt">
+                            <input type="checkbox" name="machine[]" value="<?= htmlspecialchars($mv) ?>"
+                                   class="ctsw-cb ctsw-machine-cb" <?= $checked ?>>
+                            <span><?= htmlspecialchars($mv) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">FABRIC WIDTH-DENIER</label>
@@ -586,4 +626,80 @@ document.getElementById('tblSearch').addEventListener('input', function(){
     outline: none;
 }
 .pqm-input option { background: #1a3358; }
+
+/* Multi-select machine dropdown (ctsw) */
+.ctsw-multi-wrap { position: relative; }
+.ctsw-multi-btn {
+    width: 100%; display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; font-size: .8rem; cursor: pointer; text-align: left;
+    min-height: 31px; user-select: none; border-radius: 8px !important;
+}
+.ctsw-multi-btn.active { border-color: #3b82f6 !important; color: #93c5fd !important; }
+.ctsw-multi-panel {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 260px; overflow-y: auto; z-index: 1050;
+    background: #0f1e35; border: 1px solid rgba(59,130,246,.35);
+    border-radius: 10px; padding: 6px 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.ctsw-multi-panel.open { display: block; }
+.ctsw-multi-opt {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+    border-radius: 6px; cursor: pointer; font-size: .8rem; color: #cbd5e1;
+    transition: background .15s; white-space: nowrap;
+}
+.ctsw-multi-opt:hover { background: rgba(59,130,246,.12); color: #f1f5f9; }
+.ctsw-cb { accent-color: #3b82f6; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
 </style>
+
+<script>
+(function () {
+    const btn    = document.getElementById('ctswMachineBtn');
+    const panel  = document.getElementById('ctswMachinePanel');
+    const label  = document.getElementById('ctswMachineLabel');
+    const allCb  = document.getElementById('ctswMachineAll');
+    const getCbs = () => [...document.querySelectorAll('.ctsw-machine-cb')];
+
+    function updateLabel() {
+        const checked = getCbs().filter(c => c.checked);
+        if (checked.length === 0) {
+            label.textContent = 'All Machines';
+            btn.classList.remove('active');
+        } else if (checked.length === 1) {
+            label.textContent = checked[0].value;
+            btn.classList.add('active');
+        } else {
+            label.textContent = checked.length + ' machines selected';
+            btn.classList.add('active');
+        }
+    }
+
+    function syncAllCb() {
+        const cbs = getCbs();
+        allCb.checked = cbs.length > 0 && cbs.every(c => c.checked);
+        allCb.indeterminate = !allCb.checked && cbs.some(c => c.checked);
+    }
+
+    btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        panel.classList.toggle('open');
+    });
+
+    allCb.addEventListener('change', function () {
+        getCbs().forEach(c => c.checked = this.checked);
+        updateLabel();
+    });
+
+    getCbs().forEach(cb => cb.addEventListener('change', function () {
+        syncAllCb();
+        updateLabel();
+    }));
+
+    document.addEventListener('click', function (e) {
+        if (!document.getElementById('ctswMachineWrap').contains(e.target))
+            panel.classList.remove('open');
+    });
+
+    syncAllCb();
+    updateLabel();
+})();
+</script>

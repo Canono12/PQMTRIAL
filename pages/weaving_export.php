@@ -6,25 +6,41 @@
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters (same as main page) ───────────────────────────────────────────────
-$f_month   = $_GET['month']   ?? '';
-$f_machine = $_GET['machine'] ?? '';
-$f_shift   = $_GET['shift']   ?? '';
-$f_line    = $_GET['line']    ?? '';
+$f_monthyear = $_GET['monthyear'] ?? '';
+$f_date_from = $_GET['date_from'] ?? '';
+$f_date_to   = $_GET['date_to']   ?? '';
+// machine filter now handled as array below
+$f_shift     = $_GET['shift']     ?? '';
+$f_line      = $_GET['line']      ?? '';
 
 $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_month) {
-    list($fm, $fy) = explode('/', $f_month, 2);
-    $where[] = "MONTH(STR_TO_DATE(Date_Harvested,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(Date_Harvested,'%m/%d/%Y'))=?";
-    $params[] = (int)$fm;
-    $params[] = (int)$fy;
-    $types .= 'ss';
+// Date_Harvested is stored as YYYY-MM-DD — no conversion needed
+if ($f_monthyear) {
+    $where[] = "DATE_FORMAT(Date_Harvested, '%Y-%m') = ?";
+    $params[] = $f_monthyear;
+    $types .= 's';
 }
-if ($f_machine) { $where[] = '`Machine_NO.` = ?';   $params[] = $f_machine; $types .= 's'; }
-if ($f_shift)   { $where[] = 'Shift = ?';            $params[] = $f_shift;   $types .= 's'; }
-if ($f_line)    { $where[] = 'Line = ?';             $params[] = $f_line;    $types .= 's'; }
+if ($f_date_from) {
+    $where[] = "Date_Harvested >= ?";
+    $params[] = $f_date_from;
+    $types .= 's';
+}
+if ($f_date_to) {
+    $where[] = "Date_Harvested <= ?";
+    $params[] = $f_date_to;
+    $types .= 's';
+}
+$f_machines  = array_filter(array_map('trim', (array)($_GET['machine'] ?? [])));
+if (!empty($f_machines)) {
+    $placeholders = implode(',', array_fill(0, count($f_machines), '?'));
+    $where[] = "`Machine_NO.` IN ($placeholders)";
+    foreach ($f_machines as $m) { $params[] = $m; $types .= 's'; }
+}
+if ($f_shift)   { $where[] = 'Shift = ?';          $params[] = $f_shift;   $types .= 's'; }
+if ($f_line)    { $where[] = 'Line = ?';            $params[] = $f_line;    $types .= 's'; }
 $wsql = implode(' AND ', $where);
 
 // ── Fetch ALL rows, ALL columns (no LIMIT) ────────────────────────────────────

@@ -4,26 +4,31 @@ $base_path  = '../';
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters ──────────────────────────────────────────────────────────────────
-$f_month    = $_GET['month']    ?? '';   // format: "M/YYYY" e.g. "3/2026"
-$f_machine  = $_GET['machine']  ?? '';
+$f_monthyear = $_GET['monthyear'] ?? '';
+$f_machines = array_filter(array_map('trim', (array)($_GET['machine'] ?? [])));
 $f_customer = $_GET['customer'] ?? '';
 $f_fabric   = $_GET['fabric']   ?? '';
 $f_jo       = $_GET['jo']       ?? '';
 $f_bagtype  = $_GET['bagtype']  ?? '';
+$f_date_from = $_GET['date_from'] ?? '';
+$f_date_to   = $_GET['date_to']   ?? '';
 
 $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-// Monthly filter: DATE_STARTED is stored as M/D/YYYY so match M/%/YYYY
-if ($f_month) {
-    list($fm, $fy) = explode('/', $f_month, 2);
-    $where[] = "MONTH(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=?";
-    $params[] = (int)$fm;   
-    $params[] = (int)$fy;   
-    $types .= 'ss';
+if ($f_monthyear) {
+    $where[] = "DATE_FORMAT(DATE_COMPLETED, '%Y-%m') = ?";
+    $params[] = $f_monthyear;
+    $types .= 's';
 }
-if ($f_machine)  { $where[] = 'MACINE_NUMBER = ?';              $params[] = $f_machine;  $types .= 's'; }
+if ($f_date_from) { $where[] = 'DATE_COMPLETED >= ?'; $params[] = $f_date_from; $types .= 's'; }
+if ($f_date_to)   { $where[] = 'DATE_COMPLETED <= ?'; $params[] = $f_date_to;   $types .= 's'; }
+if (!empty($f_machines)) {
+    $placeholders = implode(',', array_fill(0, count($f_machines), '?'));
+    $where[] = "MACINE_NUMBER IN ($placeholders)";
+    foreach ($f_machines as $m) { $params[] = $m; $types .= 's'; }
+}
 if ($f_customer) { $where[] = 'INPUT_CUSTOMER = ?';             $params[] = $f_customer; $types .= 's'; }
 if ($f_fabric)   { $where[] = 'FABRIC_WIDTH_TAPE_DENIER = ?';   $params[] = $f_fabric;   $types .= 's'; }
 if ($f_jo)       { $where[] = 'JOB_ORDER_NO = ?';               $params[] = $f_jo;       $types .= 's'; }
@@ -107,20 +112,7 @@ $c_customer = chart_data($conn,
     $types, $params, 'k', 'v1');
 
 // ── Filter options ────────────────────────────────────────────────────────────
-// Build distinct month/year options from DATE_STARTED (format M/D/YYYY)
-$opt_months_raw = $conn->query("SELECT DISTINCT DATE_STARTED FROM welding WHERE DATE_STARTED IS NOT NULL AND DATE_STARTED != '' ORDER BY DATE_STARTED");
-$opt_months = [];
-while ($om = $opt_months_raw->fetch_assoc()) {
-    $parts = explode('/', $om['DATE_STARTED']);
-    if (count($parts) === 3) {
-        $key = $parts[0] . '/' . $parts[2]; // M/YYYY
-        $label = date('F Y', mktime(0,0,0,(int)$parts[0],1,(int)$parts[2]));
-        $opt_months[$key] = $label;
-    }
-}
-// Sort by year then month
-uksort($opt_months, function($a,$b){ list($am,$ay)=explode('/',$a); list($bm,$by)=explode('/',$b); return $ay!=$by?$ay-$by:$am-$bm; });
-
+$opt_months    = $conn->query("SELECT DISTINCT DATE_FORMAT(DATE_COMPLETED, '%Y-%m') AS v, DATE_FORMAT(DATE_COMPLETED, '%M %Y') AS label FROM welding WHERE DATE_COMPLETED IS NOT NULL AND DATE_COMPLETED != '' AND DATE_COMPLETED != '0000-00-00' ORDER BY v DESC");
 $opt_machines  = $conn->query("SELECT DISTINCT MACINE_NUMBER v FROM welding WHERE MACINE_NUMBER IS NOT NULL AND MACINE_NUMBER != '' ORDER BY MACINE_NUMBER");
 $opt_customers = $conn->query("SELECT DISTINCT INPUT_CUSTOMER v FROM welding WHERE INPUT_CUSTOMER IS NOT NULL AND INPUT_CUSTOMER != '' ORDER BY INPUT_CUSTOMER");
 $opt_fabrics   = $conn->query("SELECT DISTINCT FABRIC_WIDTH_TAPE_DENIER v FROM welding WHERE FABRIC_WIDTH_TAPE_DENIER IS NOT NULL AND FABRIC_WIDTH_TAPE_DENIER != '' ORDER BY FABRIC_WIDTH_TAPE_DENIER");
@@ -168,25 +160,46 @@ require_once __DIR__ . '/../includes/navbar.php';
         <form method="GET" class="row g-2 align-items-end">
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MONTH</label>
-                <select name="month" class="form-select form-select-sm pqm-input">
+                <select name="monthyear" class="form-select form-select-sm pqm-input">
                     <option value="">All Months</option>
-                    <?php foreach ($opt_months as $mv => $ml): ?>
-                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_month===$mv?'selected':'' ?>>
-                        <?= htmlspecialchars($ml) ?>
+                    <?php while ($o = $opt_months->fetch_assoc()): ?>
+                    <option value="<?= htmlspecialchars($o['v']) ?>" <?= $f_monthyear===$o['v']?'selected':'' ?>>
+                        <?= htmlspecialchars($o['label']) ?>
                     </option>
-                    <?php endforeach; ?>
+                    <?php endwhile; ?>
                 </select>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE NUMBER</label>
-                <select name="machine" class="form-select form-select-sm pqm-input">
-                    <option value="">All Machines</option>
-                    <?php while ($o = $opt_machines->fetch_assoc()): ?>
-                    <option value="<?= htmlspecialchars($o['v']) ?>" <?= $f_machine===$o['v']?'selected':'' ?>>
-                        <?= htmlspecialchars($o['v']) ?>
-                    </option>
-                    <?php endwhile; ?>
-                </select>
+                <div class="cnv-multi-wrap" id="cnvMachineWrap">
+                    <button type="button" class="cnv-multi-btn pqm-input" id="cnvMachineBtn">
+                        <span id="cnvMachineLabel">
+                            <?php if (!empty($f_machines)): ?>
+                                <?= count($f_machines) === 1 ? htmlspecialchars($f_machines[0]) : count($f_machines) . ' machines selected' ?>
+                            <?php else: ?>All Machines<?php endif; ?>
+                        </span>
+                        <i class="bi bi-chevron-down" style="font-size:.7rem;margin-left:auto;opacity:.6"></i>
+                    </button>
+                    <div class="cnv-multi-panel" id="cnvMachinePanel">
+                        <label class="cnv-multi-opt">
+                            <input type="checkbox" id="cnvMachineAll" class="cnv-cb">
+                            <span style="color:#94a3b8;font-style:italic">All Machines</span>
+                        </label>
+                        <div style="border-top:1px solid rgba(255,255,255,.07);margin:3px 0"></div>
+                        <?php
+                        $machines_list = [];
+                        while ($o = $opt_machines->fetch_assoc()) $machines_list[] = $o['v'];
+                        foreach ($machines_list as $mv):
+                            $checked = in_array((string)$mv, array_map('strval', $f_machines)) ? 'checked' : '';
+                        ?>
+                        <label class="cnv-multi-opt">
+                            <input type="checkbox" name="machine[]" value="<?= htmlspecialchars($mv) ?>"
+                                   class="cnv-cb cnv-machine-cb" <?= $checked ?>>
+                            <span><?= htmlspecialchars($mv) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">CUSTOMER</label>
@@ -225,6 +238,27 @@ require_once __DIR__ . '/../includes/navbar.php';
                 <label class="form-label text-secondary" style="font-size:.72rem">BAG TYPE</label>
                 <input type="text" name="bagtype" class="form-control form-control-sm pqm-input"
                        placeholder="Search bag type..." value="<?= htmlspecialchars($f_bagtype) ?>">
+            </div>
+            <!-- ── Date Range Filter ───────────────────────────── -->
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">
+                    <i class="bi bi-calendar-range me-1" style="color:#22c55e"></i>DATE FINISHED FROM
+                </label>
+                <input type="text" name="date_from" id="date_from"
+                       class="form-control form-control-sm pqm-input pqm-datepicker"
+                       placeholder="Start date"
+                       value="<?= htmlspecialchars($f_date_from) ?>"
+                       autocomplete="off" readonly>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">
+                    <i class="bi bi-calendar-range me-1" style="color:#22c55e"></i>DATE FINISHED TO
+                </label>
+                <input type="text" name="date_to" id="date_to"
+                       class="form-control form-control-sm pqm-input pqm-datepicker"
+                       placeholder="End date"
+                       value="<?= htmlspecialchars($f_date_to) ?>"
+                       autocomplete="off" readonly>
             </div>
             <div class="col-12 d-flex gap-2 mt-1">
                 <button type="submit" class="btn btn-primary btn-sm px-4">
@@ -541,6 +575,96 @@ document.getElementById('tblSearch').addEventListener('input', function () {
         tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
     });
 });
+
+// ── Date Range Pickers (Flatpickr) ────────────────────────────────────────────
+(function initDatePickers() {
+    // Dynamically load Flatpickr if not already present
+    function loadFlatpickr(cb) {
+        if (window.flatpickr) { cb(); return; }
+        const link = document.createElement('link');
+        link.rel  = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css';
+        document.head.appendChild(link);
+
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/flatpickr';
+        script.onload = cb;
+        document.head.appendChild(script);
+    }
+
+    loadFlatpickr(function () {
+        // Apply dark theme overrides to match .pqm-input style
+        const style = document.createElement('style');
+        style.textContent = `
+            .flatpickr-calendar {
+                background: #1a3358 !important;
+                border: 1px solid rgba(34,197,94,.35) !important;
+                box-shadow: 0 8px 32px rgba(0,0,0,.5) !important;
+                border-radius: 10px !important;
+                font-family: inherit !important;
+            }
+            .flatpickr-months .flatpickr-month,
+            .flatpickr-weekdays,
+            span.flatpickr-weekday { background: #1a3358 !important; color: #86efac !important; }
+            .flatpickr-day { color: #f1f5f9 !important; border-radius: 6px !important; }
+            .flatpickr-day:hover { background: rgba(34,197,94,.2) !important; border-color: #22c55e !important; }
+            .flatpickr-day.selected,
+            .flatpickr-day.startRange,
+            .flatpickr-day.endRange {
+                background: #22c55e !important;
+                border-color: #22c55e !important;
+                color: #052e16 !important;
+                font-weight: 700 !important;
+            }
+            .flatpickr-day.inRange {
+                background: rgba(34,197,94,.15) !important;
+                border-color: transparent !important;
+                box-shadow: -5px 0 0 rgba(34,197,94,.15), 5px 0 0 rgba(34,197,94,.15) !important;
+            }
+            .flatpickr-day.today { border-color: #22c55e !important; }
+            .flatpickr-day.flatpickr-disabled { color: #334155 !important; }
+            .flatpickr-current-month input.cur-year,
+            .flatpickr-current-month .flatpickr-monthDropdown-months {
+                color: #f1f5f9 !important; background: transparent !important;
+            }
+            .flatpickr-monthDropdown-months option { background: #1a3358 !important; }
+            .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #86efac !important; }
+            .flatpickr-prev-month:hover svg, .flatpickr-next-month:hover svg { fill: #22c55e !important; }
+            .numInputWrapper:hover { background: rgba(34,197,94,.08) !important; }
+        `;
+        document.head.appendChild(style);
+
+        const fromPicker = flatpickr('#date_from', {
+            dateFormat: 'Y-m-d',
+            allowInput: false,
+            disableMobile: true,
+            onChange: function(selectedDates, dateStr) {
+                // Auto-open the "to" picker after selecting from-date
+                if (selectedDates.length > 0) {
+                    toPicker.set('minDate', selectedDates[0]);
+                    setTimeout(() => toPicker.open(), 120);
+                }
+            }
+        });
+
+        const toPicker = flatpickr('#date_to', {
+            dateFormat: 'Y-m-d',
+            allowInput: false,
+            disableMobile: true,
+            onChange: function(selectedDates) {
+                if (selectedDates.length > 0) {
+                    fromPicker.set('maxDate', selectedDates[0]);
+                }
+            }
+        });
+
+        // Clear button resets date pickers too
+        document.querySelector('a[href="conversion.php"]')?.addEventListener('click', function() {
+            fromPicker.clear();
+            toPicker.clear();
+        });
+    });
+})();
 </script>
 
 <style>
@@ -558,4 +682,80 @@ document.getElementById('tblSearch').addEventListener('input', function () {
     outline: none;
 }
 .pqm-input option { background: #1a3358; }
+
+/* Multi-select machine dropdown (conversion) */
+.cnv-multi-wrap { position: relative; }
+.cnv-multi-btn {
+    width: 100%; display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; font-size: .8rem; cursor: pointer; text-align: left;
+    min-height: 31px; user-select: none; border-radius: 8px !important;
+}
+.cnv-multi-btn.active { border-color: #22c55e !important; color: #86efac !important; }
+.cnv-multi-panel {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 260px; overflow-y: auto; z-index: 1050;
+    background: #0f2818; border: 1px solid rgba(34,197,94,.35);
+    border-radius: 10px; padding: 6px 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.cnv-multi-panel.open { display: block; }
+.cnv-multi-opt {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+    border-radius: 6px; cursor: pointer; font-size: .8rem; color: #cbd5e1;
+    transition: background .15s; white-space: nowrap;
+}
+.cnv-multi-opt:hover { background: rgba(34,197,94,.12); color: #f1f5f9; }
+.cnv-cb { accent-color: #22c55e; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
 </style>
+
+<script>
+(function () {
+    const btn    = document.getElementById('cnvMachineBtn');
+    const panel  = document.getElementById('cnvMachinePanel');
+    const label  = document.getElementById('cnvMachineLabel');
+    const allCb  = document.getElementById('cnvMachineAll');
+    const getCbs = () => [...document.querySelectorAll('.cnv-machine-cb')];
+
+    function updateLabel() {
+        const checked = getCbs().filter(c => c.checked);
+        if (checked.length === 0) {
+            label.textContent = 'All Machines';
+            btn.classList.remove('active');
+        } else if (checked.length === 1) {
+            label.textContent = checked[0].value;
+            btn.classList.add('active');
+        } else {
+            label.textContent = checked.length + ' machines selected';
+            btn.classList.add('active');
+        }
+    }
+
+    function syncAllCb() {
+        const cbs = getCbs();
+        allCb.checked = cbs.length > 0 && cbs.every(c => c.checked);
+        allCb.indeterminate = !allCb.checked && cbs.some(c => c.checked);
+    }
+
+    btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        panel.classList.toggle('open');
+    });
+
+    allCb.addEventListener('change', function () {
+        getCbs().forEach(c => c.checked = this.checked);
+        updateLabel();
+    });
+
+    getCbs().forEach(cb => cb.addEventListener('change', function () {
+        syncAllCb();
+        updateLabel();
+    }));
+
+    document.addEventListener('click', function (e) {
+        if (!document.getElementById('cnvMachineWrap').contains(e.target))
+            panel.classList.remove('open');
+    });
+
+    syncAllCb();
+    updateLabel();
+})();
+</script>

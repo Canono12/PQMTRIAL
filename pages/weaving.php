@@ -4,25 +4,40 @@ $base_path  = '../';
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters ──────────────────────────────────────────────────────────────────
-$f_month   = $_GET['month']   ?? '';   // M/YYYY
-$f_machine = $_GET['machine'] ?? '';
-$f_shift   = $_GET['shift']   ?? '';
-$f_line    = $_GET['line']    ?? '';
+$f_monthyear = $_GET['monthyear'] ?? '';   // YYYY-MM
+$f_date_from = $_GET['date_from'] ?? '';   // YYYY-MM-DD
+$f_date_to   = $_GET['date_to']   ?? '';   // YYYY-MM-DD
+$f_machines  = array_filter(array_map('trim', (array)($_GET['machine'] ?? [])));
+$f_shift     = $_GET['shift']     ?? '';
+$f_line      = $_GET['line']      ?? '';
 
 $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_month) {
-    list($fm, $fy) = explode('/', $f_month, 2);
-    $where[] = "MONTH(STR_TO_DATE(Date_Harvested,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(Date_Harvested,'%m/%d/%Y'))=?";
-    $params[] = (int)$fm;
-    $params[] = (int)$fy;
-    $types .= 'ss';
+// Date_Harvested is stored as YYYY-MM-DD -- no conversion needed
+if ($f_monthyear) {
+    $where[] = "DATE_FORMAT(Date_Harvested, '%Y-%m') = ?";
+    $params[] = $f_monthyear;
+    $types .= 's';
 }
-if ($f_machine) { $where[] = '`Machine_NO.` = ?';   $params[] = $f_machine; $types .= 's'; }
-if ($f_shift)   { $where[] = 'Shift = ?';            $params[] = $f_shift;   $types .= 's'; }
-if ($f_line)    { $where[] = 'Line = ?';             $params[] = $f_line;    $types .= 's'; }
+if ($f_date_from) {
+    $where[] = "Date_Harvested >= ?";
+    $params[] = $f_date_from;
+    $types .= 's';
+}
+if ($f_date_to) {
+    $where[] = "Date_Harvested <= ?";
+    $params[] = $f_date_to;
+    $types .= 's';
+}
+if (!empty($f_machines)) {
+    $placeholders = implode(',', array_fill(0, count($f_machines), '?'));
+    $where[] = "`Machine_NO.` IN ($placeholders)";
+    foreach ($f_machines as $m) { $params[] = $m; $types .= 's'; }
+}
+if ($f_shift)   { $where[] = 'Shift = ?';          $params[] = $f_shift;   $types .= 's'; }
+if ($f_line)    { $where[] = 'Line = ?';            $params[] = $f_line;    $types .= 's'; }
 $wsql = implode(' AND ', $where);
 
 function qry($conn, $sql, $t = '', $p = []) {
@@ -94,17 +109,11 @@ $c_fabric = chart_data($conn,
     $types, $params, 'k', 'v1');
 
 // ── Filter options ────────────────────────────────────────────────────────────
-$opt_months_raw = $conn->query("SELECT DISTINCT Date_Harvested FROM weaving WHERE Date_Harvested IS NOT NULL AND Date_Harvested != '' ORDER BY Date_Harvested");
+$opt_months_raw = $conn->query("SELECT DISTINCT DATE_FORMAT(Date_Harvested, '%Y-%m') AS v, DATE_FORMAT(Date_Harvested, '%M %Y') AS label FROM weaving WHERE Date_Harvested IS NOT NULL AND Date_Harvested != '' ORDER BY v DESC");
 $opt_months = [];
 while ($om = $opt_months_raw->fetch_assoc()) {
-    $parts = explode('/', $om['Date_Harvested']);
-    if (count($parts) === 3) {
-        $key = $parts[0] . '/' . $parts[2];
-        $label = date('F Y', mktime(0,0,0,(int)$parts[0],1,(int)$parts[2]));
-        $opt_months[$key] = $label;
-    }
+    if ($om['v']) $opt_months[$om['v']] = $om['label'];
 }
-uksort($opt_months, function($a,$b){ list($am,$ay)=explode('/',$a); list($bm,$by)=explode('/',$b); return $ay!=$by?$ay-$by:$am-$bm; });
 
 $opt_machines = $conn->query("SELECT DISTINCT `Machine_NO.` v FROM weaving ORDER BY `Machine_NO.`+0");
 $opt_shifts   = $conn->query("SELECT DISTINCT Shift v FROM weaving ORDER BY Shift");
@@ -151,25 +160,56 @@ require_once __DIR__ . '/../includes/navbar.php';
         <form method="GET" class="row g-2 align-items-end">
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MONTH</label>
-                <select name="month" class="form-select form-select-sm pqm-input">
+                <select name="monthyear" class="form-select form-select-sm pqm-input">
                     <option value="">All Months</option>
                     <?php foreach ($opt_months as $mv => $ml): ?>
-                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_month===$mv?'selected':'' ?>>
+                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_monthyear===$mv?'selected':'' ?>>
                         <?= htmlspecialchars($ml) ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED FROM</label>
+                <input type="date" name="date_from" class="form-control form-control-sm pqm-input"
+                       value="<?= htmlspecialchars($f_date_from) ?>">
+            </div>
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED TO</label>
+                <input type="date" name="date_to" class="form-control form-control-sm pqm-input"
+                       value="<?= htmlspecialchars($f_date_to) ?>">
+            </div>
+            <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE</label>
-                <select name="machine" class="form-select form-select-sm pqm-input">
-                    <option value="">All Machines</option>
-                    <?php while ($o = $opt_machines->fetch_assoc()): ?>
-                    <option value="<?= htmlspecialchars($o['v']) ?>" <?= $f_machine===$o['v']?'selected':'' ?>>
-                        Machine <?= htmlspecialchars($o['v']) ?>
-                    </option>
-                    <?php endwhile; ?>
-                </select>
+                <div class="weav-multi-wrap" id="machineDropWrap">
+                    <button type="button" class="weav-multi-btn pqm-input" id="machineDropBtn">
+                        <span id="machineDropLabel">
+                            <?php if (!empty($f_machines)): ?>
+                                <?= count($f_machines) === 1 ? 'Machine ' . htmlspecialchars($f_machines[0]) : count($f_machines) . ' machines selected' ?>
+                            <?php else: ?>All Machines<?php endif; ?>
+                        </span>
+                        <i class="bi bi-chevron-down" style="font-size:.7rem;margin-left:auto;opacity:.6"></i>
+                    </button>
+                    <div class="weav-multi-panel" id="machineDropPanel">
+                        <label class="weav-multi-opt">
+                            <input type="checkbox" id="machineSelectAll" class="weav-cb">
+                            <span style="color:#94a3b8;font-style:italic">All Machines</span>
+                        </label>
+                        <div style="border-top:1px solid rgba(255,255,255,.07);margin:3px 0"></div>
+                        <?php
+                        $machines_list = [];
+                        while ($o = $opt_machines->fetch_assoc()) $machines_list[] = $o['v'];
+                        foreach ($machines_list as $mv):
+                            $checked = in_array((string)$mv, array_map('strval', $f_machines)) ? 'checked' : '';
+                        ?>
+                        <label class="weav-multi-opt">
+                            <input type="checkbox" name="machine[]" value="<?= htmlspecialchars($mv) ?>"
+                                   class="weav-cb weav-machine-cb" <?= $checked ?>>
+                            <span>Machine <?= htmlspecialchars($mv) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">SHIFT</label>
@@ -193,7 +233,7 @@ require_once __DIR__ . '/../includes/navbar.php';
                     <?php endwhile; ?>
                 </select>
             </div>
-            <div class="col-12 col-lg-4 d-flex gap-2">
+            <div class="col-12 d-flex gap-2 mt-1">
                 <button type="submit" class="btn btn-primary btn-sm px-4">
                     <i class="bi bi-search me-1"></i> Apply
                 </button>
@@ -448,4 +488,83 @@ document.getElementById('tblSearch').addEventListener('input', function(){
     outline: none;
 }
 .pqm-input option { background: #1a3358; }
+
+/* Multi-select machine dropdown */
+.weav-multi-wrap { position: relative; }
+.weav-multi-btn {
+    width: 100%; display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; font-size: .8rem; cursor: pointer; text-align: left;
+    background: #1a3358 !important; border: 1px solid rgba(255,255,255,.1) !important;
+    color: #f1f5f9 !important; border-radius: 8px !important;
+    min-height: 31px; user-select: none;
+}
+.weav-multi-btn:focus { border-color: #3b82f6 !important; box-shadow: 0 0 0 3px rgba(59,130,246,.2) !important; outline: none; }
+.weav-multi-btn.active { border-color: #3b82f6 !important; color: #93c5fd !important; }
+.weav-multi-panel {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 260px; overflow-y: auto; z-index: 1050;
+    background: #1a3358; border: 1px solid rgba(59,130,246,.35);
+    border-radius: 10px; padding: 6px 4px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+}
+.weav-multi-panel.open { display: block; }
+.weav-multi-opt {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+    border-radius: 6px; cursor: pointer; font-size: .8rem; color: #cbd5e1;
+    transition: background .15s; white-space: nowrap;
+}
+.weav-multi-opt:hover { background: rgba(59,130,246,.15); color: #f1f5f9; }
+.weav-cb { accent-color: #3b82f6; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
 </style>
+
+<script>
+(function () {
+    const btn    = document.getElementById('machineDropBtn');
+    const panel  = document.getElementById('machineDropPanel');
+    const label  = document.getElementById('machineDropLabel');
+    const allCb  = document.getElementById('machineSelectAll');
+    const getCbs = () => [...document.querySelectorAll('.weav-machine-cb')];
+
+    function updateLabel() {
+        const checked = getCbs().filter(c => c.checked);
+        if (checked.length === 0) {
+            label.textContent = 'All Machines';
+            btn.classList.remove('active');
+        } else if (checked.length === 1) {
+            label.textContent = 'Machine ' + checked[0].value;
+            btn.classList.add('active');
+        } else {
+            label.textContent = checked.length + ' machines selected';
+            btn.classList.add('active');
+        }
+    }
+
+    function syncAllCb() {
+        const cbs = getCbs();
+        allCb.checked = cbs.length > 0 && cbs.every(c => c.checked);
+        allCb.indeterminate = !allCb.checked && cbs.some(c => c.checked);
+    }
+
+    btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        panel.classList.toggle('open');
+    });
+
+    allCb.addEventListener('change', function () {
+        getCbs().forEach(c => c.checked = this.checked);
+        updateLabel();
+    });
+
+    getCbs().forEach(cb => cb.addEventListener('change', function () {
+        syncAllCb();
+        updateLabel();
+    }));
+
+    document.addEventListener('click', function (e) {
+        if (!document.getElementById('machineDropWrap').contains(e.target))
+            panel.classList.remove('open');
+    });
+
+    syncAllCb();
+    updateLabel();
+})();
+</script>

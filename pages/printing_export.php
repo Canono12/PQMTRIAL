@@ -6,8 +6,10 @@
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters (same as main page) ───────────────────────────────────────────────
-$f_month   = $_GET['month']   ?? '';
-$f_machine = $_GET['machine'] ?? '';
+$f_monthyear = $_GET['monthyear'] ?? '';
+$f_date_from = $_GET['date_from'] ?? '';
+$f_date_to   = $_GET['date_to']   ?? '';
+$f_machines = array_filter(array_map('trim', (array)($_GET['machine'] ?? [])));
 $f_shift   = $_GET['shift']   ?? '';
 $f_fabric  = $_GET['fabric']  ?? '';
 $f_design  = $_GET['design']  ?? '';
@@ -17,14 +19,31 @@ $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_month) {
-    list($fm, $fy) = explode('/', $f_month, 2);
-    $where[] = "MONTH(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=?";
-    $params[] = (int)$fm;
-    $params[] = (int)$fy;
-    $types .= 'ss';
+if ($f_monthyear) {
+    $where[] = "DATE_FORMAT(STR_TO_DATE(DATE_COMPLETED,'%m/%d/%Y'), '%Y-%m') = ?";
+    $params[] = $f_monthyear;
+    $types .= 's';
 }
-if ($f_machine) { $where[] = 'MACHINE_NUMBER = ?';                $params[] = $f_machine; $types .= 's'; }
+if ($f_date_from) {
+    $where[] = "STR_TO_DATE(DATE_COMPLETED,'%m/%d/%Y') >= ?";
+    $params[] = $f_date_from;
+    $types .= 's';
+}
+if ($f_date_to) {
+    $where[] = "STR_TO_DATE(DATE_COMPLETED,'%m/%d/%Y') <= ?";
+    $params[] = $f_date_to;
+    $types .= 's';
+}
+if (!empty($f_machines)) {
+    $placeholders = implode(',', array_fill(0, count($f_machines), '?'));
+    $where[] = "MACHINE_NUMBER IN ($placeholders)";
+    foreach ($f_machines as $m) { $params[] = $m; $types .= 's'; }
+}
+if ($f_shift)   { $where[] = 'PRINTED_FABRIC = ?';               $params[] = $f_shift;   $types .= 's'; }
+if ($f_fabric)  { $where[] = 'FABRIC_WIDTH_AND_TAPE_DENIER = ?'; $params[] = $f_fabric;  $types .= 's'; }
+if ($f_design)  { $where[] = 'PRINT_DESIGN LIKE ?';              $params[] = '%'.$f_design.'%'; $types .= 's'; }
+if ($f_jo)      { $where[] = 'JOB_ORDER_NUMBER = ?';             $params[] = $f_jo;      $types .= 's'; }
+// machine filter handled above via \$f_machines array
 if ($f_shift)   { $where[] = 'PRINTED_FABRIC = ?';                $params[] = $f_shift;   $types .= 's'; }
 if ($f_fabric)  { $where[] = 'FABRIC_WIDTH_AND_TAPE_DENIER = ?';  $params[] = $f_fabric;  $types .= 's'; }
 if ($f_design)  { $where[] = 'PRINT_DESIGN LIKE ?';               $params[] = '%'.$f_design.'%'; $types .= 's'; }

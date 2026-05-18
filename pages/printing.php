@@ -4,8 +4,10 @@ $base_path  = '../';
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters ──────────────────────────────────────────────────────────────────
-$f_month    = $_GET['month']    ?? '';   // M/YYYY
-$f_machine = $_GET['machine'] ?? '';
+$f_monthyear = $_GET['monthyear'] ?? '';
+$f_date_from = $_GET['date_from'] ?? '';
+$f_date_to   = $_GET['date_to']   ?? '';
+$f_machines = array_filter(array_map('trim', (array)($_GET['machine'] ?? [])));
 $f_shift   = $_GET['shift']   ?? '';
 $f_fabric  = $_GET['fabric']  ?? '';
 $f_design  = $_GET['design']  ?? '';
@@ -15,18 +17,31 @@ $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_month) {
-    list($fm, $fy) = explode('/', $f_month, 2);
-    $where[] = "MONTH(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=?";
-    $params[] = (int)$fm;
-    $params[] = (int)$fy;
-    $types .= 'ss';
+if ($f_monthyear) {
+    $where[] = "DATE_FORMAT(DATE_COMPLETED, '%Y-%m') = ?";
+    $params[] = $f_monthyear;
+    $types .= 's';
 }
-if ($f_machine) { $where[] = 'MACHINE_NUMBER = ?';                  $params[] = $f_machine; $types .= 's'; }
-if ($f_shift)   { $where[] = 'PRINTED_FABRIC = ?';                  $params[] = $f_shift;   $types .= 's'; }
-if ($f_fabric)  { $where[] = 'FABRIC_WIDTH_AND_TAPE_DENIER = ?';    $params[] = $f_fabric;  $types .= 's'; }
-if ($f_design)  { $where[] = 'PRINT_DESIGN LIKE ?';                 $params[] = '%'.$f_design.'%'; $types .= 's'; }
-if ($f_jo)      { $where[] = 'JOB_ORDER_NUMBER = ?';                $params[] = $f_jo;      $types .= 's'; }
+if ($f_date_from) {
+    $where[] = "DATE_COMPLETED >= ?";
+    $params[] = $f_date_from;
+    $types .= 's';
+}
+if ($f_date_to) {
+    $where[] = "DATE_COMPLETED <= ?";
+    $params[] = $f_date_to;
+    $types .= 's';
+}
+if (!empty($f_machines)) {
+    $placeholders = implode(',', array_fill(0, count($f_machines), '?'));
+    $where[] = "MACHINE_NUMBER IN ($placeholders)";
+    foreach ($f_machines as $m) { $params[] = $m; $types .= 's'; }
+}
+if ($f_shift)   { $where[] = 'PRINTED_FABRIC = ?';               $params[] = $f_shift;   $types .= 's'; }
+if ($f_fabric)  { $where[] = 'FABRIC_WIDTH_AND_TAPE_DENIER = ?'; $params[] = $f_fabric;  $types .= 's'; }
+if ($f_design)  { $where[] = 'PRINT_DESIGN LIKE ?';              $params[] = '%'.$f_design.'%'; $types .= 's'; }
+if ($f_jo)      { $where[] = 'JOB_ORDER_NUMBER = ?';             $params[] = $f_jo;      $types .= 's'; }
+$wsql = implode(' AND ', $where);
 
 $wsql = implode(' AND ', $where);
 
@@ -110,18 +125,11 @@ $c_jo = chart_data($conn,
     $types, $params, 'k', 'v1', 'v2');
 
 // ── Filter options ────────────────────────────────────────────────────────────
-$opt_months_raw = $conn->query("SELECT DISTINCT DATE_STARTED FROM printing WHERE DATE_STARTED IS NOT NULL AND DATE_STARTED != '' ORDER BY DATE_STARTED");
+$opt_months_raw = $conn->query("SELECT DISTINCT DATE_FORMAT(DATE_COMPLETED,'%Y-%m') AS v, DATE_FORMAT(DATE_COMPLETED,'%M %Y') AS label FROM printing WHERE DATE_COMPLETED IS NOT NULL AND DATE_COMPLETED != '' AND DATE_COMPLETED != '0000-00-00' ORDER BY v DESC");
 $opt_months = [];
 while ($om = $opt_months_raw->fetch_assoc()) {
-    $parts = explode('/', $om['DATE_STARTED']);
-    if (count($parts) === 3) {
-        $key = $parts[0] . '/' . $parts[2];
-        $label = date('F Y', mktime(0,0,0,(int)$parts[0],1,(int)$parts[2]));
-        $opt_months[$key] = $label;
-    }
+    if ($om['v']) $opt_months[$om['v']] = $om['label'];
 }
-uksort($opt_months, function($a,$b){ list($am,$ay)=explode('/',$a); list($bm,$by)=explode('/',$b); return $ay!=$by?$ay-$by:$am-$bm; });
-
 $opt_machines = $conn->query("SELECT DISTINCT MACHINE_NUMBER v FROM printing WHERE MACHINE_NUMBER IS NOT NULL AND MACHINE_NUMBER != '' ORDER BY MACHINE_NUMBER");
 $opt_shifts   = $conn->query("SELECT DISTINCT PRINTED_FABRIC v FROM printing WHERE PRINTED_FABRIC IS NOT NULL AND PRINTED_FABRIC != '' ORDER BY PRINTED_FABRIC");
 $opt_fabrics  = $conn->query("SELECT DISTINCT FABRIC_WIDTH_AND_TAPE_DENIER v FROM printing WHERE FABRIC_WIDTH_AND_TAPE_DENIER IS NOT NULL AND FABRIC_WIDTH_AND_TAPE_DENIER != '' ORDER BY FABRIC_WIDTH_AND_TAPE_DENIER");
@@ -172,25 +180,57 @@ require_once __DIR__ . '/../includes/navbar.php';
         <form method="GET" class="row g-2 align-items-end">
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MONTH</label>
-                <select name="month" class="form-select form-select-sm pqm-input">
+                <select name="monthyear" class="form-select form-select-sm pqm-input">
                     <option value="">All Months</option>
                     <?php foreach ($opt_months as $mv => $ml): ?>
-                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_month===$mv?'selected':'' ?>>
+                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_monthyear===$mv?'selected':'' ?>>
                         <?= htmlspecialchars($ml) ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
             </div>
+
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED FROM</label>
+                <input type="date" name="date_from" class="form-control form-control-sm pqm-input"
+                       value="<?= htmlspecialchars($f_date_from) ?>">
+            </div>
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED TO</label>
+                <input type="date" name="date_to" class="form-control form-control-sm pqm-input"
+                       value="<?= htmlspecialchars($f_date_to) ?>">
+            </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE</label>
-                <select name="machine" class="form-select form-select-sm pqm-input">
-                    <option value="">All Machines</option>
-                    <?php while ($o = $opt_machines->fetch_assoc()): ?>
-                    <option value="<?= htmlspecialchars($o['v']) ?>" <?= $f_machine===$o['v']?'selected':'' ?>>
-                        <?= htmlspecialchars($o['v']) ?>
-                    </option>
-                    <?php endwhile; ?>
-                </select>
+                <div class="prn-multi-wrap" id="prnMachineWrap">
+                    <button type="button" class="prn-multi-btn pqm-input" id="prnMachineBtn">
+                        <span id="prnMachineLabel">
+                            <?php if (!empty($f_machines)): ?>
+                                <?= count($f_machines) === 1 ? htmlspecialchars($f_machines[0]) : count($f_machines) . ' machines selected' ?>
+                            <?php else: ?>All Machines<?php endif; ?>
+                        </span>
+                        <i class="bi bi-chevron-down" style="font-size:.7rem;margin-left:auto;opacity:.6"></i>
+                    </button>
+                    <div class="prn-multi-panel" id="prnMachinePanel">
+                        <label class="prn-multi-opt">
+                            <input type="checkbox" id="prnMachineAll" class="prn-cb">
+                            <span style="color:#94a3b8;font-style:italic">All Machines</span>
+                        </label>
+                        <div style="border-top:1px solid rgba(255,255,255,.07);margin:3px 0"></div>
+                        <?php
+                        $machines_list = [];
+                        while ($o = $opt_machines->fetch_assoc()) $machines_list[] = $o['v'];
+                        foreach ($machines_list as $mv):
+                            $checked = in_array((string)$mv, array_map('strval', $f_machines)) ? 'checked' : '';
+                        ?>
+                        <label class="prn-multi-opt">
+                            <input type="checkbox" name="machine[]" value="<?= htmlspecialchars($mv) ?>"
+                                   class="prn-cb prn-machine-cb" <?= $checked ?>>
+                            <span><?= htmlspecialchars($mv) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">PRINTED FABRIC</label>
@@ -528,4 +568,80 @@ document.getElementById('tblSearch').addEventListener('input', function(){
     outline: none;
 }
 .pqm-input option { background: #1a3358; }
+
+/* Multi-select machine dropdown (printing) */
+.prn-multi-wrap { position: relative; }
+.prn-multi-btn {
+    width: 100%; display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; font-size: .8rem; cursor: pointer; text-align: left;
+    min-height: 31px; user-select: none; border-radius: 8px !important;
+}
+.prn-multi-btn.active { border-color: #f59e0b !important; color: #fcd34d !important; }
+.prn-multi-panel {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 260px; overflow-y: auto; z-index: 1050;
+    background: #1a2535; border: 1px solid rgba(245,158,11,.35);
+    border-radius: 10px; padding: 6px 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.prn-multi-panel.open { display: block; }
+.prn-multi-opt {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+    border-radius: 6px; cursor: pointer; font-size: .8rem; color: #cbd5e1;
+    transition: background .15s; white-space: nowrap;
+}
+.prn-multi-opt:hover { background: rgba(245,158,11,.12); color: #f1f5f9; }
+.prn-cb { accent-color: #f59e0b; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
 </style>
+
+<script>
+(function () {
+    const btn    = document.getElementById('prnMachineBtn');
+    const panel  = document.getElementById('prnMachinePanel');
+    const label  = document.getElementById('prnMachineLabel');
+    const allCb  = document.getElementById('prnMachineAll');
+    const getCbs = () => [...document.querySelectorAll('.prn-machine-cb')];
+
+    function updateLabel() {
+        const checked = getCbs().filter(c => c.checked);
+        if (checked.length === 0) {
+            label.textContent = 'All Machines';
+            btn.classList.remove('active');
+        } else if (checked.length === 1) {
+            label.textContent = checked[0].value;
+            btn.classList.add('active');
+        } else {
+            label.textContent = checked.length + ' machines selected';
+            btn.classList.add('active');
+        }
+    }
+
+    function syncAllCb() {
+        const cbs = getCbs();
+        allCb.checked = cbs.length > 0 && cbs.every(c => c.checked);
+        allCb.indeterminate = !allCb.checked && cbs.some(c => c.checked);
+    }
+
+    btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        panel.classList.toggle('open');
+    });
+
+    allCb.addEventListener('change', function () {
+        getCbs().forEach(c => c.checked = this.checked);
+        updateLabel();
+    });
+
+    getCbs().forEach(cb => cb.addEventListener('change', function () {
+        syncAllCb();
+        updateLabel();
+    }));
+
+    document.addEventListener('click', function (e) {
+        if (!document.getElementById('prnMachineWrap').contains(e.target))
+            panel.classList.remove('open');
+    });
+
+    syncAllCb();
+    updateLabel();
+})();
+</script>

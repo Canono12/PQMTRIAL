@@ -4,26 +4,39 @@ $base_path  = '../';
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters ───────────────────────────────────────────────────────────────────
-$f_month   = $_GET['month']    ?? '';
-$f_machine = $_GET['machine']  ?? '';
-$f_shift   = $_GET['shift']    ?? '';
-$f_rm      = $_GET['rm']       ?? '';
+$f_monthyear = $_GET['monthyear'] ?? '';
+$f_date_from = $_GET['date_from'] ?? '';
+$f_date_to   = $_GET['date_to']   ?? '';
+$f_machines  = array_filter(array_map('trim', (array)($_GET['machine'] ?? [])));
+$f_rm        = $_GET['rm']        ?? '';
 
 $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_month) {
-    list($fm, $fy) = explode('/', $f_month, 2);
-    $where[] = "MONTH(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(DATE_STARTED,'%m/%d/%Y'))=?";
-    $params[] = (int)$fm;
-    $params[] = (int)$fy;
-    $types .= 'ss';
+if ($f_monthyear) {
+    $where[] = "DATE_FORMAT(DATE_COMPLETED, '%Y-%m') = ?";
+    $params[] = $f_monthyear;
+    $types .= 's';
+}
+if ($f_date_from) {
+    $where[] = "DATE_COMPLETED >= ?";
+    $params[] = $f_date_from;
+    $types .= 's';
+}
+if ($f_date_to) {
+    $where[] = "DATE_COMPLETED <= ?";
+    $params[] = $f_date_to;
+    $types .= 's';
 }
 $f_shift     = $_GET['shift']      ?? '';
 $f_rm        = $_GET['rm']         ?? '';
 
-if ($f_machine)   { $where[] = 'machine_number = ?'; $params[] = $f_machine;  $types .= 's'; }
+if (!empty($f_machines)) {
+    $placeholders = implode(',', array_fill(0, count($f_machines), '?'));
+    $where[] = "machine_number IN ($placeholders)";
+    foreach ($f_machines as $m) { $params[] = $m; $types .= 's'; }
+}
 if ($f_rm) {
     // RM filter covers PP and CC columns
     $where[] = '(PP LIKE ? OR CALCIUM_CARBONATE_1 LIKE ? OR CALCIUM_CARBONATE_2 LIKE ?)';
@@ -126,7 +139,7 @@ $c_trend = lqry($conn,
             SUM(CAST(ROLL_WEIGHT_kilograms AS DECIMAL(10,3))) AS v_out,
             SUM(CAST(OUTPUT_WASTE_grams AS DECIMAL(12,3)) / 1000) AS v_waste
      FROM laminationimport_fixed WHERE $wsql AND DATE_STARTED IS NOT NULL AND DATE_STARTED != ''
-     GROUP BY DATE_STARTED ORDER BY STR_TO_DATE(DATE_STARTED, '%m/%d/%Y') ASC LIMIT 30",
+     GROUP BY DATE_STARTED ORDER BY DATE_STARTED ASC LIMIT 30",
     $types, $params);
 $trend_data = ['labels' => [], 'output' => [], 'waste' => []];
 while ($row = $c_trend->fetch_assoc()) {
@@ -136,18 +149,11 @@ while ($row = $c_trend->fetch_assoc()) {
 }
 
 // ── Filter options ────────────────────────────────────────────────────────────
-$opt_months_raw = $conn->query("SELECT DISTINCT DATE_STARTED FROM laminationimport_fixed WHERE DATE_STARTED IS NOT NULL AND DATE_STARTED != '' ORDER BY DATE_STARTED");
+$opt_months_raw = $conn->query("SELECT DISTINCT DATE_FORMAT(DATE_COMPLETED,'%Y-%m') AS v, DATE_FORMAT(DATE_COMPLETED,'%M %Y') AS label FROM laminationimport_fixed WHERE DATE_COMPLETED IS NOT NULL AND DATE_COMPLETED != '' AND DATE_COMPLETED != '0000-00-00' ORDER BY v DESC");
 $opt_months = [];
 while ($om = $opt_months_raw->fetch_assoc()) {
-    $parts = explode('/', $om['DATE_STARTED']);
-    if (count($parts) === 3) {
-        $key = $parts[0] . '/' . $parts[2];
-        $label = date('F Y', mktime(0,0,0,(int)$parts[0],1,(int)$parts[2]));
-        $opt_months[$key] = $label;
-    }
+    if ($om['v']) $opt_months[$om['v']] = $om['label'];
 }
-uksort($opt_months, function($a,$b){ list($am,$ay)=explode('/',$a); list($bm,$by)=explode('/',$b); return $ay!=$by?$ay-$by:$am-$bm; });
-
 $opt_machines = $conn->query("SELECT DISTINCT machine_number v FROM laminationimport_fixed WHERE machine_number IS NOT NULL AND machine_number != '' ORDER BY machine_number");
 $opt_pp       = $conn->query("SELECT DISTINCT PP v FROM laminationimport_fixed WHERE PP IS NOT NULL AND PP != '' ORDER BY PP");
 
@@ -194,25 +200,57 @@ require_once __DIR__ . '/../includes/navbar.php';
         <form method="GET" class="row g-2 align-items-end">
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MONTH</label>
-                <select name="month" class="form-select form-select-sm pqm-input lam-input">
+                <select name="monthyear" class="form-select form-select-sm pqm-input lam-input">
                     <option value="">All Months</option>
                     <?php foreach ($opt_months as $mv => $ml): ?>
-                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_month===$mv?'selected':'' ?>>
+                    <option value="<?= htmlspecialchars($mv) ?>" <?= $f_monthyear===$mv?'selected':'' ?>>
                         <?= htmlspecialchars($ml) ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
             </div>
+
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED FROM</label>
+                <input type="date" name="date_from" class="form-control form-control-sm pqm-input"
+                       value="<?= htmlspecialchars($f_date_from) ?>">
+            </div>
+            <div class="col-6 col-md-3 col-lg-2">
+                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED TO</label>
+                <input type="date" name="date_to" class="form-control form-control-sm pqm-input"
+                       value="<?= htmlspecialchars($f_date_to) ?>">
+            </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE</label>
-                <select name="machine" class="form-select form-select-sm pqm-input lam-input">
-                    <option value="">All Machines</option>
-                    <?php while ($o = $opt_machines->fetch_assoc()): ?>
-                    <option value="<?= htmlspecialchars($o['v']) ?>" <?= $f_machine===$o['v']?'selected':'' ?>>
-                        <?= htmlspecialchars($o['v']) ?>
-                    </option>
-                    <?php endwhile; ?>
-                </select>
+                <div class="lam-multi-wrap" id="lamMachineWrap">
+                    <button type="button" class="lam-multi-btn lam-input" id="lamMachineBtn">
+                        <span id="lamMachineLabel">
+                            <?php if (!empty($f_machines)): ?>
+                                <?= count($f_machines) === 1 ? htmlspecialchars($f_machines[0]) : count($f_machines) . ' machines selected' ?>
+                            <?php else: ?>All Machines<?php endif; ?>
+                        </span>
+                        <i class="bi bi-chevron-down" style="font-size:.7rem;margin-left:auto;opacity:.6"></i>
+                    </button>
+                    <div class="lam-multi-panel" id="lamMachinePanel">
+                        <label class="lam-multi-opt">
+                            <input type="checkbox" id="lamMachineAll" class="lam-cb">
+                            <span style="color:#94a3b8;font-style:italic">All Machines</span>
+                        </label>
+                        <div style="border-top:1px solid rgba(255,255,255,.07);margin:3px 0"></div>
+                        <?php
+                        $machines_list = [];
+                        while ($o = $opt_machines->fetch_assoc()) $machines_list[] = $o['v'];
+                        foreach ($machines_list as $mv):
+                            $checked = in_array((string)$mv, array_map('strval', $f_machines)) ? 'checked' : '';
+                        ?>
+                        <label class="lam-multi-opt">
+                            <input type="checkbox" name="machine[]" value="<?= htmlspecialchars($mv) ?>"
+                                   class="lam-cb lam-machine-cb" <?= $checked ?>>
+                            <span><?= htmlspecialchars($mv) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">RM COMPONENT (PP)</label>
@@ -564,4 +602,80 @@ document.getElementById('tblSearch').addEventListener('input', function () {
     outline: none;
 }
 .lam-input option { background: #0e2236; }
+
+/* Multi-select machine dropdown (lamination) */
+.lam-multi-wrap { position: relative; }
+.lam-multi-btn {
+    width: 100%; display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; font-size: .8rem; cursor: pointer; text-align: left;
+    min-height: 31px; user-select: none; border-radius: 8px !important;
+}
+.lam-multi-btn.active { border-color: #22d3ee !important; color: #67e8f9 !important; }
+.lam-multi-panel {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 260px; overflow-y: auto; z-index: 1050;
+    background: #0e2236; border: 1px solid rgba(34,211,238,.3);
+    border-radius: 10px; padding: 6px 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.lam-multi-panel.open { display: block; }
+.lam-multi-opt {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+    border-radius: 6px; cursor: pointer; font-size: .8rem; color: #cbd5e1;
+    transition: background .15s; white-space: nowrap;
+}
+.lam-multi-opt:hover { background: rgba(34,211,238,.12); color: #f1f5f9; }
+.lam-cb { accent-color: #22d3ee; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
 </style>
+
+<script>
+(function () {
+    const btn    = document.getElementById('lamMachineBtn');
+    const panel  = document.getElementById('lamMachinePanel');
+    const label  = document.getElementById('lamMachineLabel');
+    const allCb  = document.getElementById('lamMachineAll');
+    const getCbs = () => [...document.querySelectorAll('.lam-machine-cb')];
+
+    function updateLabel() {
+        const checked = getCbs().filter(c => c.checked);
+        if (checked.length === 0) {
+            label.textContent = 'All Machines';
+            btn.classList.remove('active');
+        } else if (checked.length === 1) {
+            label.textContent = checked[0].value;
+            btn.classList.add('active');
+        } else {
+            label.textContent = checked.length + ' machines selected';
+            btn.classList.add('active');
+        }
+    }
+
+    function syncAllCb() {
+        const cbs = getCbs();
+        allCb.checked = cbs.length > 0 && cbs.every(c => c.checked);
+        allCb.indeterminate = !allCb.checked && cbs.some(c => c.checked);
+    }
+
+    btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        panel.classList.toggle('open');
+    });
+
+    allCb.addEventListener('change', function () {
+        getCbs().forEach(c => c.checked = this.checked);
+        updateLabel();
+    });
+
+    getCbs().forEach(cb => cb.addEventListener('change', function () {
+        syncAllCb();
+        updateLabel();
+    }));
+
+    document.addEventListener('click', function (e) {
+        if (!document.getElementById('lamMachineWrap').contains(e.target))
+            panel.classList.remove('open');
+    });
+
+    syncAllCb();
+    updateLabel();
+})();
+</script>

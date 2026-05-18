@@ -6,8 +6,10 @@
 require_once __DIR__ . '/../includes/db.php';
 
 // ── Filters (same as main page) ───────────────────────────────────────────────
-$f_month    = $_GET['month']    ?? '';
-$f_machine  = $_GET['machine']  ?? '';
+$f_monthyear = $_GET['monthyear'] ?? '';
+$f_date_from = $_GET['date_from'] ?? '';
+$f_date_to   = $_GET['date_to']   ?? '';
+$f_machines = array_filter(array_map('trim', (array)($_GET['machine'] ?? [])));
 $f_shift    = $_GET['shift']    ?? '';
 $f_bag_type = $_GET['bag_type'] ?? '';
 $f_fabric   = $_GET['fabric']   ?? '';
@@ -18,14 +20,32 @@ $where  = ['1=1'];
 $params = [];
 $types  = '';
 
-if ($f_month) {
-    list($fm, $fy) = explode('/', $f_month, 2);
-    $where[] = "MONTH(STR_TO_DATE(ENCODING_DATE,'%m/%d/%Y'))=? AND YEAR(STR_TO_DATE(ENCODING_DATE,'%m/%d/%Y'))=?";
-    $params[] = (int)$fm;
-    $params[] = (int)$fy;
-    $types .= 'ss';
+if ($f_monthyear) {
+    $where[] = "DATE_FORMAT(STR_TO_DATE(DATE_FINISHED,'%m/%d/%Y'), '%Y-%m') = ?";
+    $params[] = $f_monthyear;
+    $types .= 's';
 }
-if ($f_machine)  { $where[] = 'MACHIN_NUMBER = ?';              $params[] = $f_machine;          $types .= 's'; }
+if ($f_date_from) {
+    $where[] = "STR_TO_DATE(DATE_FINISHED,'%m/%d/%Y') >= ?";
+    $params[] = $f_date_from;
+    $types .= 's';
+}
+if ($f_date_to) {
+    $where[] = "STR_TO_DATE(DATE_FINISHED,'%m/%d/%Y') <= ?";
+    $params[] = $f_date_to;
+    $types .= 's';
+}
+if (!empty($f_machines)) {
+    $placeholders = implode(',', array_fill(0, count($f_machines), '?'));
+    $where[] = "MACHIN_NUMBER IN ($placeholders)";
+    foreach ($f_machines as $m) { $params[] = $m; $types .= 's'; }
+}
+if ($f_shift)    { $where[] = 'SHIFT_PRODUCTION_PERSONNEL LIKE ?'; $params[] = '%'.$f_shift.'%'; $types .= 's'; }
+if ($f_bag_type) { $where[] = 'BAG_TYPE LIKE ?';                $params[] = '%'.$f_bag_type.'%'; $types .= 's'; }
+if ($f_fabric)   { $where[] = 'FABRIC_WIDTH_TAPE_DENIER = ?';  $params[] = $f_fabric;   $types .= 's'; }
+if ($f_jo)       { $where[] = 'JOB_ORDER_NUMBER = ?';           $params[] = $f_jo;       $types .= 's'; }
+if ($f_customer) { $where[] = 'CUSTOMER = ?';                   $params[] = $f_customer; $types .= 's'; }
+// machine filter handled above via $f_machines array
 if ($f_shift)    { $where[] = 'SHIFT_PRODUCTION_PERSONNEL LIKE ?'; $params[] = '%'.$f_shift.'%'; $types .= 's'; }
 if ($f_bag_type) { $where[] = 'BAG_TYPE LIKE ?';                $params[] = '%'.$f_bag_type.'%'; $types .= 's'; }
 if ($f_fabric)   { $where[] = 'FABRIC_WIDTH_TAPE_DENIER = ?';  $params[] = $f_fabric;           $types .= 's'; }
