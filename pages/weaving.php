@@ -38,6 +38,16 @@ if (!empty($f_machines)) {
 }
 if ($f_shift)   { $where[] = 'Shift = ?';          $params[] = $f_shift;   $types .= 's'; }
 if ($f_line)    { $where[] = 'Line = ?';            $params[] = $f_line;    $types .= 's'; }
+if (!empty($_GET['search'])) {
+    $f_search = trim($_GET['search']);
+    $like = '%' . $f_search . '%';
+    $where[] = "(`Series_Number` LIKE ? OR `Loom_Batch_Code` LIKE ? OR `Line` LIKE ? OR `Shift` LIKE ? OR `Machine_NO.` LIKE ? OR `Remarks` LIKE ?)";
+    $params[] = $like; $params[] = $like; $params[] = $like;
+    $params[] = $like; $params[] = $like; $params[] = $like;
+    $types .= 'ssssss';
+} else {
+    $f_search = '';
+}
 $wsql = implode(' AND ', $where);
 
 function qry($conn, $sql, $t = '', $p = []) {
@@ -65,48 +75,50 @@ $kpi = qry($conn,
          FROM weaving WHERE $wsql
      ) t", $types, $params
 )->fetch_assoc();
+$has_data = ($kpi['recs'] ?? 0) > 0;
 
 // ── Chart data helpers ────────────────────────────────────────────────────────
-function chart_data($conn, $sql, $t, $p, $key_col, $val_col) {
+function chart_data($conn, $sql, $t, $p, $key_col, $val_col, $val_col2 = null) {
     $r = qry($conn, $sql, $t, $p);
-    $out = ['labels' => [], 'v1' => []];
+    $out = ['labels' => [], 'v1' => [], 'v2' => []];
     while ($row = $r->fetch_assoc()) {
         $out['labels'][] = $row[$key_col];
         $out['v1'][]     = (float)$row[$val_col];
+        if ($val_col2) $out['v2'][] = (float)$row[$val_col2];
     }
     return $out;
 }
 
-// Output per Machine — Weight(Kg)
+// Output per Machine — Weight(Kg) + Rolls
 $c_machine = chart_data($conn,
-    "SELECT mno AS k, SUM(CAST(wkg AS DECIMAL(10,2))) AS v1
-     FROM (SELECT `Machine_NO.` AS mno, `Weight(Kg)` AS wkg FROM weaving WHERE $wsql) t
+    "SELECT mno AS k, SUM(CAST(wkg AS DECIMAL(10,2))) AS v1, SUM(rolls) AS v2
+     FROM (SELECT `Machine_NO.` AS mno, `Weight(Kg)` AS wkg, `NO_of_roll` AS rolls FROM weaving WHERE $wsql) t
      GROUP BY mno ORDER BY v1 DESC LIMIT 15",
-    $types, $params, 'k', 'v1');
+    $types, $params, 'k', 'v1', 'v2');
 $c_machine['labels'] = array_map(fn($x) => 'M'.$x, $c_machine['labels']);
 
-// Output per Line — Weight(Kg)
+// Output per Line — Weight(Kg) + Rolls
 $c_line = chart_data($conn,
-    "SELECT line_ AS k, SUM(CAST(wkg AS DECIMAL(10,2))) AS v1
-     FROM (SELECT Line AS line_, `Weight(Kg)` AS wkg FROM weaving WHERE $wsql) t
+    "SELECT line_ AS k, SUM(CAST(wkg AS DECIMAL(10,2))) AS v1, SUM(rolls) AS v2
+     FROM (SELECT Line AS line_, `Weight(Kg)` AS wkg, `NO_of_roll` AS rolls FROM weaving WHERE $wsql) t
      GROUP BY line_ ORDER BY line_",
-    $types, $params, 'k', 'v1');
+    $types, $params, 'k', 'v1', 'v2');
 $c_line['labels'] = array_map(fn($x) => 'Line '.$x, $c_line['labels']);
 
-// Output per Shift — Weight(Kg)
+// Output per Shift — Weight(Kg) + Rolls
 $c_shift = chart_data($conn,
-    "SELECT shift_ AS k, SUM(CAST(wkg AS DECIMAL(10,2))) AS v1
-     FROM (SELECT Shift AS shift_, `Weight(Kg)` AS wkg FROM weaving WHERE $wsql) t
+    "SELECT shift_ AS k, SUM(CAST(wkg AS DECIMAL(10,2))) AS v1, SUM(rolls) AS v2
+     FROM (SELECT Shift AS shift_, `Weight(Kg)` AS wkg, `NO_of_roll` AS rolls FROM weaving WHERE $wsql) t
      GROUP BY shift_ ORDER BY shift_",
-    $types, $params, 'k', 'v1');
+    $types, $params, 'k', 'v1', 'v2');
 $c_shift['labels'] = array_map(fn($x) => 'Shift '.$x, $c_shift['labels']);
 
-// Output per Fabric Width-Denier — Weight(Kg)
+// Output per Fabric Width-Denier — Weight(Kg) + Rolls
 $c_fabric = chart_data($conn,
-    "SELECT fabric AS k, SUM(CAST(wkg AS DECIMAL(10,2))) AS v1
-     FROM (SELECT CONCAT(`Width(mm)`,'mm-',Denier,'D') AS fabric, `Weight(Kg)` AS wkg FROM weaving WHERE $wsql) t
+    "SELECT fabric AS k, SUM(CAST(wkg AS DECIMAL(10,2))) AS v1, SUM(rolls) AS v2
+     FROM (SELECT CONCAT(`Width(mm)`,'mm-',Denier,'D') AS fabric, `Weight(Kg)` AS wkg, `NO_of_roll` AS rolls FROM weaving WHERE $wsql) t
      GROUP BY fabric ORDER BY v1 DESC LIMIT 10",
-    $types, $params, 'k', 'v1');
+    $types, $params, 'k', 'v1', 'v2');
 
 // ── Filter options ────────────────────────────────────────────────────────────
 $opt_months_raw = $conn->query("SELECT DISTINCT DATE_FORMAT(Date_Harvested, '%Y-%m') AS v, DATE_FORMAT(Date_Harvested, '%M %Y') AS label FROM weaving WHERE Date_Harvested IS NOT NULL AND Date_Harvested != '' ORDER BY v DESC");
@@ -121,13 +133,15 @@ $opt_lines    = $conn->query("SELECT DISTINCT Line v FROM weaving ORDER BY Line"
 
 // ── Table ─────────────────────────────────────────────────────────────────────
 $rows = qry($conn,
-    "SELECT `Machine_NO.` AS machine, Line, Shift,
-            `Weight(Kg)` AS weight,
-            `NO_of_roll` AS rolls, Loom_Batch_Code AS jo,
-            Date_Harvested AS dt,
-            CONCAT(`Width(mm)`,'mm-',Denier,'D') AS fabric,
-            Remarks
-     FROM weaving WHERE $wsql ORDER BY ID DESC LIMIT 50",
+    "SELECT `ID`, `Series_Number`, `Date_Harvested`, `Time_Harvested`, `Line`,
+            `Machine_NO.`, `Shift`, `Loom_Batch_Code`, `Length(M)`, `Weight(Kg)`,
+            `Width(mm)`, `Denier`, `NO_of_roll`, `Classification_of_roll`,
+            `Fabric_GSM`, `Remarks`,
+            `YARN_BATCHCODE_(WARP1)`, `YARN_BATCHCODE(WARP2)`, `YARN_BATCHCODE(WARP3)`,
+            `YARN_BATCHCODE(WARP4)`, `YARN_BATCHCODE(WEFT1)`, `YARN_BATCHCODE(WEFT2)`,
+            `YARN_BATCHCODE(WEFT3)`, `YARN_BATCHCODE(WEFT4)`, `YARN_BATCHCODE(WEFT5)`,
+            `YARN_BATCHCODE(WEFT6)`, `YARN_BATCHCODE(WEFT8)`
+     FROM weaving WHERE $wsql ORDER BY Date_Harvested DESC, Time_Harvested DESC, ID DESC LIMIT 500",
     $types, $params);
 
 require_once __DIR__ . '/../includes/header.php';
@@ -145,6 +159,15 @@ require_once __DIR__ . '/../includes/navbar.php';
             <div class="page-subheading mt-1">Output (kg) and fabric production analytics</div>
         </div>
         <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- View Toggle -->
+            <div class="ext-toggle-wrap">
+                <button type="button" class="ext-toggle-btn active" id="weavBtnCounts" onclick="weavSetView('counts')">
+                    <i class="bi bi-boxes me-1"></i>Counts
+                </button>
+                <button type="button" class="ext-toggle-btn" id="weavBtnWeight" onclick="weavSetView('weight')">
+                    <i class="bi bi-box-seam me-1"></i>Weight
+                </button>
+            </div>
             <span class="badge process-badge" style="background:#1e3a5f;border:1px solid #3b82f6;color:#93c5fd">
                 <i class="bi bi-database me-1"></i>weaving
             </span>
@@ -169,15 +192,17 @@ require_once __DIR__ . '/../includes/navbar.php';
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-6 col-md-3 col-lg-2">
-                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED FROM</label>
-                <input type="date" name="date_from" class="form-control form-control-sm pqm-input"
-                       value="<?= htmlspecialchars($f_date_from) ?>">
-            </div>
-            <div class="col-6 col-md-3 col-lg-2">
-                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED TO</label>
-                <input type="date" name="date_to" class="form-control form-control-sm pqm-input"
-                       value="<?= htmlspecialchars($f_date_to) ?>">
+            <div class="col-12 col-md-6 col-lg-3">
+                <label class="form-label text-secondary" style="font-size:.72rem">
+                    <i class="bi bi-calendar-range me-1" style="color:#22c55e"></i>DATE FINISHED RANGE
+                </label>
+                <input type="hidden" name="date_from" id="weav_date_from" value="<?= htmlspecialchars($f_date_from) ?>">
+                <input type="hidden" name="date_to"   id="weav_date_to"   value="<?= htmlspecialchars($f_date_to) ?>">
+                <input type="text" id="weav_date_range"
+                       class="form-control form-control-sm pqm-input"
+                       placeholder="Start date — End date"
+                       autocomplete="off" readonly
+                       style="background:#1a3358!important;color:#f1f5f9!important;border:1px solid rgba(255,255,255,.1)!important;border-radius:8px!important;">
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE</label>
@@ -233,8 +258,8 @@ require_once __DIR__ . '/../includes/navbar.php';
                     <?php endwhile; ?>
                 </select>
             </div>
-            <div class="col-12 d-flex gap-2 mt-1">
-                <button type="submit" class="btn btn-primary btn-sm px-4">
+            <div class="col-auto d-flex gap-2 align-items-end">
+                <button type="submit" class="btn btn-primary btn-sm px-3">
                     <i class="bi bi-search me-1"></i> Apply
                 </button>
                 <a href="weaving.php" class="btn btn-outline-secondary btn-sm px-3">
@@ -244,19 +269,55 @@ require_once __DIR__ . '/../includes/navbar.php';
         </form>
     </div>
 
-    <!-- KPI Cards -->
-    <div class="row g-3 mb-4">
+    <?php if (!$has_data): ?>
+    <!-- Empty state -->
+    <div class="pqm-card mb-4">
+        <div class="d-flex flex-column align-items-center justify-content-center py-5"
+             style="border:1px dashed rgba(59,130,246,.3);border-radius:10px;background:rgba(30,58,95,.12);">
+            <i class="bi bi-diagram-3" style="font-size:3rem;color:#3b82f6;opacity:.4"></i>
+            <div class="mt-3 fw-semibold" style="color:#94a3b8;font-size:1rem">No Weaving Data Yet</div>
+            <div class="mt-1" style="color:#64748b;font-size:.85rem">Upload a CSV file to populate charts and records.</div>
+            <a href="#" class="pqm-upload-trigger-btn mt-3" data-bs-toggle="modal" data-bs-target="#uploadModal_weaving">
+                <i class="bi bi-file-earmark-excel"></i> Upload CSV File
+            </a>
+        </div>
+    </div>
+    <?php else: ?>
+    <!-- KPI Cards — COUNTS VIEW -->
+    <div class="row g-2 mb-4 row-cols-2 row-cols-md-3 row-cols-xl-5 weav-kpi-row weav-view-counts">
         <?php
-        $kpis = [
-            ['val' => number_format((float)$kpi['tot_weight'], 1), 'label' => 'Total Output (kg)',  'icon' => 'bi-speedometer2', 'cls' => 'icon-blue'],
-            ['val' => number_format((int)$kpi['recs']),            'label' => 'Total Records',      'icon' => 'bi-collection',   'cls' => 'icon-teal'],
-            ['val' => number_format((int)$kpi['tot_rolls']),       'label' => 'Total Rolls',        'icon' => 'bi-box-seam',     'cls' => 'icon-green'],
-            ['val' => '—',                                          'label' => 'Total Waste (kg)',   'icon' => 'bi-slash-circle', 'cls' => 'icon-amber', 'note' => 'No data yet'],
-            ['val' => (int)$kpi['machines'],                       'label' => 'Active Machines',    'icon' => 'bi-cpu',          'cls' => 'icon-red'],
-            ['val' => (int)$kpi['shifts'],                         'label' => 'Active Shifts',      'icon' => 'bi-clock',        'cls' => 'icon-purple'],
+        $kpis_counts = [
+            ['val' => number_format((int)$kpi['recs']),        'label' => 'Total Records',       'icon' => 'bi-collection',          'cls' => 'icon-teal'],
+            ['val' => number_format((int)$kpi['tot_rolls']),   'label' => 'Total Rolls (count)',  'icon' => 'bi-box-seam',            'cls' => 'icon-green'],
+            ['val' => (int)$kpi['machines'],                   'label' => 'Active Machines',     'icon' => 'bi-cpu',                 'cls' => 'icon-red'],
+            ['val' => (int)$kpi['shifts'],                     'label' => 'Active Shifts',       'icon' => 'bi-clock',               'cls' => 'icon-purple'],
+            ['val' => (int)$kpi['tot_lines'],                  'label' => 'Active Lines',        'icon' => 'bi-layout-three-columns','cls' => 'icon-blue'],
         ];
-        foreach ($kpis as $k): ?>
-        <div class="col-6 col-xl-2">
+        foreach ($kpis_counts as $k): ?>
+        <div class="col">
+            <div class="pqm-card stat-card">
+                <div class="stat-icon <?= $k['cls'] ?>"><i class="<?= $k['icon'] ?>"></i></div>
+                <div>
+                    <div class="stat-value"><?= $k['val'] ?></div>
+                    <div class="stat-label"><?= $k['label'] ?></div>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+
+    <!-- KPI Cards — WEIGHT VIEW -->
+    <div class="row g-2 mb-4 row-cols-2 row-cols-md-3 row-cols-xl-5 weav-kpi-row weav-view-weight" style="display:none!important">
+        <?php
+        $kpis_weight = [
+            ['val' => number_format((int)$kpi['recs']),                     'label' => 'Total Records',    'icon' => 'bi-collection',   'cls' => 'icon-teal'],
+            ['val' => number_format((float)$kpi['tot_weight'], 1) . ' kg',  'label' => 'Total Output (kg)','icon' => 'bi-speedometer2', 'cls' => 'icon-blue'],
+            ['val' => '—',                                                   'label' => 'Total Waste (kg)', 'icon' => 'bi-slash-circle', 'cls' => 'icon-amber', 'note' => 'No data yet'],
+            ['val' => (int)$kpi['machines'],                                'label' => 'Active Machines',  'icon' => 'bi-cpu',          'cls' => 'icon-red'],
+            ['val' => (int)$kpi['shifts'],                                  'label' => 'Active Shifts',    'icon' => 'bi-clock',        'cls' => 'icon-purple'],
+        ];
+        foreach ($kpis_weight as $k): ?>
+        <div class="col">
             <div class="pqm-card stat-card">
                 <div class="stat-icon <?= $k['cls'] ?>"><i class="<?= $k['icon'] ?>"></i></div>
                 <div>
@@ -271,56 +332,81 @@ require_once __DIR__ . '/../includes/navbar.php';
         <?php endforeach; ?>
     </div>
 
-    <!-- Charts Row 1 — Output per Machine | Output per Line -->
-    <div class="row g-3 mb-3">
-        <div class="col-12 col-lg-8">
-            <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-bar-chart-fill"></i> Output (kg) per Machine</div>
-                <div class="chart-wrapper" style="height:270px">
-                    <canvas id="cMachine"></canvas>
+    <!-- ── COUNTS VIEW: Charts ── -->
+    <div class="weav-view-counts">
+        <div class="row g-3 mb-3">
+            <div class="col-12 col-lg-8">
+                <div class="pqm-card h-100">
+                    <div class="section-title"><i class="bi bi-bar-chart-fill"></i> Rolls (count) per Machine</div>
+                    <div class="chart-wrapper" style="height:270px">
+                        <canvas id="cMachineC"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-4">
+                <div class="pqm-card h-100">
+                    <div class="section-title"><i class="bi bi-pie-chart-fill"></i> Rolls (count) per Line</div>
+                    <div class="chart-wrapper" style="height:270px">
+                        <canvas id="cLineC"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="col-12 col-lg-4">
-            <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-pie-chart-fill"></i> Output (kg) per Line</div>
-                <div class="chart-wrapper" style="height:270px">
-                    <canvas id="cLine"></canvas>
+        <div class="row g-3 mb-4">
+            <div class="col-12 col-md-5">
+                <div class="pqm-card h-100">
+                    <div class="section-title"><i class="bi bi-bar-chart"></i> Rolls (count) per Shift</div>
+                    <div class="chart-wrapper" style="height:255px">
+                        <canvas id="cShiftC"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-7">
+                <div class="pqm-card h-100">
+                    <div class="section-title"><i class="bi bi-grid-3x2-gap"></i> Rolls (count) per Fabric Width-Denier</div>
+                    <div class="chart-wrapper" style="height:255px">
+                        <canvas id="cFabricC"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Charts Row 2 — Output per Shift | Output per Fabric Width-Denier -->
-    <div class="row g-3 mb-3">
-        <div class="col-12 col-md-5">
-            <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-bar-chart"></i> Output (kg) per Shift</div>
-                <div class="chart-wrapper" style="height:255px">
-                    <canvas id="cShift"></canvas>
+    <!-- ── WEIGHT VIEW: Charts ── -->
+    <div class="weav-view-weight" style="display:none">
+        <div class="row g-3 mb-3">
+            <div class="col-12 col-lg-8">
+                <div class="pqm-card h-100">
+                    <div class="section-title"><i class="bi bi-bar-chart-fill" style="color:#f59e0b"></i> Output (kg) per Machine</div>
+                    <div class="chart-wrapper" style="height:270px">
+                        <canvas id="cMachineW"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-4">
+                <div class="pqm-card h-100">
+                    <div class="section-title"><i class="bi bi-pie-chart-fill" style="color:#f59e0b"></i> Output (kg) per Line</div>
+                    <div class="chart-wrapper" style="height:270px">
+                        <canvas id="cLineW"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="col-12 col-md-7">
-            <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-grid-3x2-gap"></i> Output (kg) per Fabric Width-Denier</div>
-                <div class="chart-wrapper" style="height:255px">
-                    <canvas id="cFabric"></canvas>
+        <div class="row g-3 mb-4">
+            <div class="col-12 col-md-5">
+                <div class="pqm-card h-100">
+                    <div class="section-title"><i class="bi bi-bar-chart" style="color:#f59e0b"></i> Output (kg) per Shift</div>
+                    <div class="chart-wrapper" style="height:255px">
+                        <canvas id="cShiftW"></canvas>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Charts Row 3 — Output per JO (placeholder — no JO data yet) -->
-    <div class="row g-3 mb-4">
-        <div class="col-12">
-            <div class="pqm-card">
-                <div class="section-title"><i class="bi bi-graph-up"></i> Output (kg) per Job Order</div>
-                <div class="d-flex flex-column align-items-center justify-content-center"
-                     style="height:180px; border:1px dashed rgba(59,130,246,.3); border-radius:10px; background:rgba(30,58,95,.15);">
-                    <i class="bi bi-hourglass-split" style="font-size:2rem;color:#3b82f6;opacity:.5"></i>
-                    <div class="mt-2" style="color:#64748b;font-size:.85rem">Job Order (JO) data not yet available</div>
-                    <div style="color:#475569;font-size:.75rem;margin-top:4px">This chart will populate once JO data is linked to the weaving records.</div>
+            <div class="col-12 col-md-7">
+                <div class="pqm-card h-100">
+                    <div class="section-title"><i class="bi bi-grid-3x2-gap" style="color:#f59e0b"></i> Output (kg) per Fabric Width-Denier</div>
+                    <div class="chart-wrapper" style="height:255px">
+                        <canvas id="cFabricW"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -331,11 +417,18 @@ require_once __DIR__ . '/../includes/navbar.php';
         <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
             <div class="section-title mb-0">
                 <i class="bi bi-table"></i> Production Records
-                <span class="text-secondary fw-normal ms-1" style="font-size:.78rem">(latest 50)</span>
+                <span class="text-secondary fw-normal ms-1" style="font-size:.78rem" id="weavRowCount"><?= number_format($kpi['recs']) ?> total</span>
             </div>
             <div class="d-flex gap-2 align-items-center flex-wrap">
-                <input type="text" id="tblSearch" class="form-control form-control-sm pqm-input"
-                       placeholder="&#xF52A; Search..." style="max-width:200px">
+                <div class="d-flex align-items-center gap-1" style="position:relative;">
+                    <input type="text" id="tblSearch" class="form-control form-control-sm pqm-input"
+                           placeholder="Search records..." style="max-width:220px;padding-right:2rem;"
+                           value="<?= htmlspecialchars($f_search) ?>"
+                           oninput="weavDoSearch(this.value)">
+                    <button id="tblSearchClear" onclick="weavClearSearch()"
+                            style="display:<?= $f_search ? 'flex' : 'none' ?>;position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#94a3b8;cursor:pointer;padding:0;line-height:1;font-size:.85rem;"
+                            title="Clear search"><i class="bi bi-x-circle-fill"></i></button>
+                </div>
                 <a href="weaving_export.php?<?= http_build_query($_GET) ?>"
                    class="btn btn-sm btn-success px-3 d-flex align-items-center gap-1" style="white-space:nowrap">
                     <i class="bi bi-file-earmark-excel"></i> Export Excel
@@ -346,16 +439,33 @@ require_once __DIR__ . '/../includes/navbar.php';
             <table class="pqm-table" id="wTable">
                 <thead>
                     <tr>
-                        <th>Date</th>
-                        <th>Machine</th>
+                        <th>ID</th>
+                        <th>Series Number</th>
+                        <th>Date Harvested</th>
+                        <th>Time Harvested</th>
                         <th>Line</th>
+                        <th>Machine No.</th>
                         <th>Shift</th>
-                        <th>Output (kg)</th>
-                        <th>Waste (kg)</th>
-                        <th>Rolls</th>
-                        <th>Fabric</th>
-                        <th>Job Order</th>
+                        <th>Loom Batch Code</th>
+                        <th>Length (M)</th>
+                        <th>Weight (Kg)</th>
+                        <th>Width (mm)</th>
+                        <th>Denier</th>
+                        <th>No. of Roll</th>
+                        <th>Classification</th>
+                        <th>Fabric GSM</th>
                         <th>Remarks</th>
+                        <th>Warp1</th>
+                        <th>Warp2</th>
+                        <th>Warp3</th>
+                        <th>Warp4</th>
+                        <th>Weft1</th>
+                        <th>Weft2</th>
+                        <th>Weft3</th>
+                        <th>Weft4</th>
+                        <th>Weft5</th>
+                        <th>Weft6</th>
+                        <th>Weft8</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -364,16 +474,33 @@ require_once __DIR__ . '/../includes/navbar.php';
                     $rb  = ($rem === '' || strtolower($rem) === 'n/a') ? 'bg-secondary' : 'bg-warning text-dark';
                 ?>
                 <tr>
-                    <td><?= htmlspecialchars($r['dt']) ?></td>
-                    <td><span class="badge bg-primary">M<?= htmlspecialchars($r['machine']) ?></span></td>
-                    <td><span class="badge" style="background:#1e3a5f;color:#93c5fd;border:1px solid #3b82f655">L<?= htmlspecialchars($r['Line']) ?></span></td>
-                    <td><span class="badge bg-secondary">S<?= htmlspecialchars($r['Shift']) ?></span></td>
-                    <td class="fw-semibold" style="color:#38bdf8"><?= number_format((float)$r['weight'], 1) ?></td>
-                    <td><span style="color:#475569;font-size:.75rem">— N/A</span></td>
-                    <td><?= (int)$r['rolls'] ?></td>
-                    <td><code style="color:#a78bfa;font-size:.75rem"><?= htmlspecialchars($r['fabric']) ?></code></td>
-                    <td><span style="color:#475569;font-size:.75rem">— N/A</span></td>
+                    <td><?= htmlspecialchars($r['ID'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Series_Number'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Date_Harvested'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Time_Harvested'] ?? '') ?></td>
+                    <td><span class="badge" style="background:#1e3a5f;color:#93c5fd;border:1px solid #3b82f655"><?= htmlspecialchars($r['Line'] ?? '') ?></span></td>
+                    <td><span class="badge bg-primary">M<?= htmlspecialchars($r['Machine_NO.'] ?? '') ?></span></td>
+                    <td><span class="badge bg-secondary"><?= htmlspecialchars($r['Shift'] ?? '') ?></span></td>
+                    <td><?= htmlspecialchars($r['Loom_Batch_Code'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Length(M)'] ?? '') ?></td>
+                    <td class="fw-semibold" style="color:#38bdf8"><?= htmlspecialchars($r['Weight(Kg)'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Width(mm)'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Denier'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['NO_of_roll'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Classification_of_roll'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Fabric_GSM'] ?? '') ?></td>
                     <td><span class="badge <?= $rb ?> process-badge"><?= htmlspecialchars($rem ?: 'N/A') ?></span></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE_(WARP1)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WARP2)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WARP3)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WARP4)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WEFT1)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WEFT2)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WEFT3)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WEFT4)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WEFT5)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WEFT6)'] ?? '') ?></td>
+                    <td style="font-size:.72rem;color:#94a3b8"><?= htmlspecialchars($r['YARN_BATCHCODE(WEFT8)'] ?? '') ?></td>
                 </tr>
                 <?php endwhile; ?>
                 </tbody>
@@ -384,6 +511,8 @@ require_once __DIR__ . '/../includes/navbar.php';
 </div><!-- /main-content -->
 </div><!-- /app-layout -->
 
+<?php endif; ?>
+
 <?php
 $upload_module='weaving';$upload_label='Weaving';
 $upload_sample='ID | Series_Number | Date_Harvested | Time_Harvested | Line | Machine_NO. | Shift | Loom_Batch_Code | Length(M) | Weight(Kg) | Width(mm) | Denier | NO_of_roll | Classification_of_roll | Fabric_GSM | Remarks | YARN_BATCHCODE_(WARP1) | ...';
@@ -392,89 +521,134 @@ require_once __DIR__.'/../includes/upload_modal.php';
 <script>window._pqmBasePath='<?=$base_path?>';</script>
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
 
+<?php if ($has_data): ?>
 <script>
 const CM = <?= json_encode($c_machine) ?>;
 const CL = <?= json_encode($c_line)    ?>;
 const CS = <?= json_encode($c_shift)   ?>;
 const CF = <?= json_encode($c_fabric)  ?>;
+const DONUT_BG = ['#3b82f6','#0ea5e9','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4','#f97316','#84cc16','#ec4899'];
 
-// 1. Machine — bar (Output kg)
-new Chart(document.getElementById('cMachine'), {
+// ── COUNTS CHARTS (Rolls) ─────────────────────────────────────────────────────
+new Chart(document.getElementById('cMachineC'), {
     type: 'bar',
-    data: { labels: CM.labels, datasets: [
-        barDataset('Output (kg)', CM.v1, PQM_COLORS.blue),
-    ]},
-    options: { responsive:true, maintainAspectRatio:false,
-        animation:{ duration:800 },
+    data: { labels: CM.labels, datasets: [ barDataset('Rolls (count)', CM.v2, PQM_COLORS.blue) ]},
+    options: { responsive:true, maintainAspectRatio:false, animation:{ duration:800 },
         plugins:{ legend:{ position:'top' } },
-        scales:{
-            x:{ grid:{ color:PQM_COLORS.grid } },
-            y:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true,
-                ticks:{ callback: v => v.toLocaleString() + ' kg' } }
-        }
-    }
+        scales:{ x:{ grid:{ color:PQM_COLORS.grid } },
+                 y:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true,
+                     ticks:{ callback: v => v.toLocaleString() + ' rolls' } } } }
 });
-
-// 2. Line — doughnut (Output kg)
-new Chart(document.getElementById('cLine'), {
+new Chart(document.getElementById('cLineC'), {
     type: 'doughnut',
-    data: { labels: CL.labels, datasets:[{
-        data: CL.v1,
-        backgroundColor:['#3b82f6','#0ea5e9','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4','#f97316','#84cc16','#ec4899'],
-        borderWidth:2, borderColor:'#162032', hoverOffset:8
-    }]},
-    options:{ responsive:true, maintainAspectRatio:false,
-        animation:{ animateRotate:true, duration:900 },
+    data: { labels: CL.labels, datasets:[{ data: CL.v2, backgroundColor: DONUT_BG, borderWidth:2, borderColor:'#162032', hoverOffset:8 }]},
+    options:{ responsive:true, maintainAspectRatio:false, animation:{ animateRotate:true, duration:900 },
         plugins:{ legend:{ position:'right', labels:{ boxWidth:12, padding:8 } },
-                  tooltip:{ callbacks:{ label: ctx => ctx.label + ': ' + ctx.parsed.toLocaleString() + ' kg' } } },
-        cutout:'60%'
-    }
+                  tooltip:{ callbacks:{ label: ctx => ctx.label + ': ' + ctx.parsed.toLocaleString() + ' rolls' } } }, cutout:'60%' }
 });
-
-// 3. Shift — bar (Output kg)
-new Chart(document.getElementById('cShift'), {
+new Chart(document.getElementById('cShiftC'), {
     type: 'bar',
-    data: { labels: CS.labels, datasets:[
-        barDataset('Output (kg)', CS.v1, PQM_COLORS.green),
-    ]},
-    options:{ responsive:true, maintainAspectRatio:false,
-        animation:{ duration:700 },
+    data: { labels: CS.labels, datasets:[ barDataset('Rolls (count)', CS.v2, PQM_COLORS.green) ]},
+    options:{ responsive:true, maintainAspectRatio:false, animation:{ duration:700 },
         plugins:{ legend:{ position:'top' } },
-        scales:{
-            x:{ grid:{ color:PQM_COLORS.grid } },
-            y:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true,
-                ticks:{ callback: v => v.toLocaleString() + ' kg' } }
-        }
-    }
+        scales:{ x:{ grid:{ color:PQM_COLORS.grid } },
+                 y:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true,
+                     ticks:{ callback: v => v.toLocaleString() + ' rolls' } } } }
 });
-
-// 4. Fabric — horizontal bar (Output kg)
-new Chart(document.getElementById('cFabric'), {
+new Chart(document.getElementById('cFabricC'), {
     type: 'bar',
-    data: { labels: CF.labels, datasets:[ barDataset('Output (kg)', CF.v1, PQM_COLORS.purple) ]},
-    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
-        animation:{ duration:800 },
-        plugins:{ legend:{ display:false },
-                  tooltip:{ callbacks:{ label: ctx => ctx.parsed.x.toLocaleString() + ' kg' } } },
-        scales:{
-            x:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true,
-                ticks:{ callback: v => v.toLocaleString() + ' kg' } },
-            y:{ grid:{ color:PQM_COLORS.grid } }
-        }
-    }
+    data: { labels: CF.labels, datasets:[ barDataset('Rolls (count)', CF.v2, PQM_COLORS.purple) ]},
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:{ duration:800 },
+        plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label: ctx => ctx.parsed.x.toLocaleString() + ' rolls' } } },
+        scales:{ x:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true, ticks:{ callback: v => v.toLocaleString() } },
+                 y:{ grid:{ color:PQM_COLORS.grid } } } }
 });
 
-// Live table search
-document.getElementById('tblSearch').addEventListener('input', function(){
-    const q = this.value.toLowerCase();
-    document.querySelectorAll('#wTable tbody tr').forEach(tr => {
-        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
-    });
+// ── WEIGHT CHARTS (kg) ────────────────────────────────────────────────────────
+new Chart(document.getElementById('cMachineW'), {
+    type: 'bar',
+    data: { labels: CM.labels, datasets: [ barDataset('Output (kg)', CM.v1, '#f59e0b') ]},
+    options: { responsive:true, maintainAspectRatio:false, animation:{ duration:800 },
+        plugins:{ legend:{ position:'top' } },
+        scales:{ x:{ grid:{ color:PQM_COLORS.grid } },
+                 y:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true,
+                     ticks:{ callback: v => v.toLocaleString() + ' kg' } } } }
 });
+new Chart(document.getElementById('cLineW'), {
+    type: 'doughnut',
+    data: { labels: CL.labels, datasets:[{ data: CL.v1, backgroundColor: DONUT_BG, borderWidth:2, borderColor:'#162032', hoverOffset:8 }]},
+    options:{ responsive:true, maintainAspectRatio:false, animation:{ animateRotate:true, duration:900 },
+        plugins:{ legend:{ position:'right', labels:{ boxWidth:12, padding:8 } },
+                  tooltip:{ callbacks:{ label: ctx => ctx.label + ': ' + ctx.parsed.toLocaleString() + ' kg' } } }, cutout:'60%' }
+});
+new Chart(document.getElementById('cShiftW'), {
+    type: 'bar',
+    data: { labels: CS.labels, datasets:[ barDataset('Output (kg)', CS.v1, '#f59e0b') ]},
+    options:{ responsive:true, maintainAspectRatio:false, animation:{ duration:700 },
+        plugins:{ legend:{ position:'top' } },
+        scales:{ x:{ grid:{ color:PQM_COLORS.grid } },
+                 y:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true,
+                     ticks:{ callback: v => v.toLocaleString() + ' kg' } } } }
+});
+new Chart(document.getElementById('cFabricW'), {
+    type: 'bar',
+    data: { labels: CF.labels, datasets:[ barDataset('Output (kg)', CF.v1, '#f59e0b') ]},
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:{ duration:800 },
+        plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label: ctx => ctx.parsed.x.toLocaleString() + ' kg' } } },
+        scales:{ x:{ grid:{ color:PQM_COLORS.grid }, beginAtZero:true, ticks:{ callback: v => v.toLocaleString() + ' kg' } },
+                 y:{ grid:{ color:PQM_COLORS.grid } } } }
+});
+
+// ── TOGGLE ────────────────────────────────────────────────────────────────────
+function weavSetView(v) {
+    document.querySelectorAll('.weav-view-counts').forEach(el => el.style.display = v === 'counts' ? '' : 'none');
+    document.querySelectorAll('.weav-view-weight').forEach(el => el.style.display = v === 'weight' ? '' : 'none');
+    document.getElementById('weavBtnCounts').classList.toggle('active', v === 'counts');
+    document.getElementById('weavBtnWeight').classList.toggle('active', v === 'weight');
+    localStorage.setItem('weavView', v);
+}
+(function(){ const v = localStorage.getItem('weavView'); if (v) weavSetView(v); })();
+
+// Search — pure client-side filter, no page reload, no scroll jump
+function weavDoSearch(q) {
+    const term = q.trim().toLowerCase();
+    let visibleCount = 0;
+    document.querySelectorAll('#wTable tbody tr').forEach(tr => {
+        const match = term === '' || tr.textContent.toLowerCase().includes(term);
+        tr.style.display = match ? '' : 'none';
+        if (match) visibleCount++;
+    });
+    // Show/hide clear button
+    const clearBtn = document.getElementById('tblSearchClear');
+    if (clearBtn) clearBtn.style.display = q.trim() ? 'flex' : 'none';
+    // Update row count label
+    const countEl = document.getElementById('weavRowCount');
+    if (countEl) countEl.textContent = term ? visibleCount + ' result' + (visibleCount !== 1 ? 's' : '') : '<?= number_format($kpi["recs"]) ?> total';
+}
+function weavClearSearch() {
+    const input = document.getElementById('tblSearch');
+    input.value = '';
+    weavDoSearch('');
+    input.focus();
+}
+// Run search on load if there was a server-side search param
+(function(){ const v = document.getElementById('tblSearch').value; if (v) weavDoSearch(v); })();
 </script>
 
 <style>
 .icon-purple { background: rgba(168,85,247,.18); color: #c084fc; }
+/* Toggle button (shared with extrusion style) */
+.ext-toggle-wrap {
+    display: flex; background: rgba(15,23,42,.6);
+    border: 1px solid rgba(148,163,184,.15); border-radius: 10px; padding: 3px; gap: 2px;
+}
+.ext-toggle-btn {
+    padding: 5px 18px; font-size: .8rem; font-weight: 600; border: none; cursor: pointer;
+    border-radius: 8px; background: transparent; color: #64748b;
+    transition: all .2s; letter-spacing: .02em;
+}
+.ext-toggle-btn.active { background: #1e3a5f; color: #93c5fd; box-shadow: 0 2px 8px rgba(59,130,246,.25); }
+.ext-toggle-btn:hover:not(.active) { color: #94a3b8; background: rgba(255,255,255,.04); }
 .pqm-input {
     background: #1a3358 !important;
     border: 1px solid rgba(255,255,255,.1) !important;
@@ -514,6 +688,29 @@ document.getElementById('tblSearch').addEventListener('input', function(){
 }
 .weav-multi-opt:hover { background: rgba(59,130,246,.15); color: #f1f5f9; }
 .weav-cb { accent-color: #3b82f6; width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
+
+/* ── Weaving KPI cards ── */
+.weav-kpi-row .stat-card {
+    display: flex; align-items: center; gap: .55rem;
+    padding: .75rem .9rem; overflow: hidden;
+}
+.weav-kpi-row .stat-icon {
+    width: 38px; height: 38px; font-size: 1rem;
+    flex-shrink: 0; border-radius: 10px;
+}
+.weav-kpi-row .stat-card > div:last-child { min-width: 0; flex: 1; overflow: hidden; }
+.weav-kpi-row .stat-value {
+    font-size: .95rem; font-weight: 700; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.weav-kpi-row .stat-label {
+    font-size: .68rem; color: var(--text-muted); margin-top: .1rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+@media (max-width: 576px) {
+    .weav-kpi-row .stat-value { font-size: .85rem; }
+    .weav-kpi-row .stat-icon  { width: 32px; height: 32px; font-size: .9rem; }
+}
 </style>
 
 <script>
@@ -567,4 +764,71 @@ document.getElementById('tblSearch').addEventListener('input', function(){
     syncAllCb();
     updateLabel();
 })();
+
+// ── Date Range Picker (Flatpickr range mode) ──
+(function initDatePickers() {
+    function loadFlatpickr(cb) {
+        if (window.flatpickr) { cb(); return; }
+        const link = document.createElement('link'); link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css';
+        document.head.appendChild(link);
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/flatpickr';
+        script.onload = cb; document.head.appendChild(script);
+    }
+    loadFlatpickr(function () {
+        const style = document.createElement('style');
+        style.textContent = `
+            .flatpickr-calendar {
+                background: #1a3358 !important;
+                border: 1px solid rgba(34,197,94,.35) !important;
+                box-shadow: 0 8px 32px rgba(0,0,0,.5) !important;
+                border-radius: 10px !important; font-family: inherit !important;
+            }
+            .flatpickr-months .flatpickr-month,
+            .flatpickr-weekdays,
+            span.flatpickr-weekday { background: #1a3358 !important; color: #86efac !important; }
+            .flatpickr-day { color: #f1f5f9 !important; border-radius: 6px !important; }
+            .flatpickr-day:hover { background: rgba(34,197,94,.2) !important; border-color: #22c55e !important; }
+            .flatpickr-day.selected,
+            .flatpickr-day.startRange,
+            .flatpickr-day.endRange {
+                background: #22c55e !important; border-color: #22c55e !important;
+                color: #052e16 !important; font-weight: 700 !important;
+            }
+            .flatpickr-day.inRange {
+                background: rgba(34,197,94,.15) !important; border-color: transparent !important;
+                box-shadow: -5px 0 0 rgba(34,197,94,.15), 5px 0 0 rgba(34,197,94,.15) !important;
+            }
+            .flatpickr-day.today { border-color: #22c55e !important; }
+            .flatpickr-day.flatpickr-disabled { color: #334155 !important; }
+            .flatpickr-current-month input.cur-year,
+            .flatpickr-current-month .flatpickr-monthDropdown-months {
+                color: #f1f5f9 !important; background: transparent !important;
+            }
+            .flatpickr-monthDropdown-months option { background: #1a3358 !important; }
+            .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #86efac !important; }
+            .flatpickr-prev-month:hover svg, .flatpickr-next-month:hover svg { fill: #22c55e !important; }
+            .numInputWrapper:hover { background: rgba(34,197,94,.08) !important; }
+`;
+        document.head.appendChild(style);
+        const fromHidden = document.getElementById('weav_date_from');
+        const toHidden   = document.getElementById('weav_date_to');
+        const rangeInput = document.getElementById('weav_date_range');
+        if (fromHidden.value && toHidden.value) rangeInput.value = fromHidden.value + ' — ' + toHidden.value;
+        else if (fromHidden.value) rangeInput.value = fromHidden.value;
+        flatpickr(rangeInput, {
+            mode: 'range', dateFormat: 'Y-m-d', allowInput: false, disableMobile: true,
+            defaultDate: [fromHidden.value || null, toHidden.value || null].filter(Boolean),
+            onChange: function(selectedDates) {
+                fromHidden.value = selectedDates[0] ? selectedDates[0].toISOString().slice(0,10) : '';
+                toHidden.value   = selectedDates[1] ? selectedDates[1].toISOString().slice(0,10) : '';
+            }
+        });
+        document.querySelector('a[href="weaving.php"]')?.addEventListener('click', function() {
+            fromHidden.value = ''; toHidden.value = '';
+        });
+    });
+})();
 </script>
+<?php endif; ?>

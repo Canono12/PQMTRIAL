@@ -111,6 +111,26 @@ $c_customer = chart_data($conn,
      GROUP BY INPUT_CUSTOMER ORDER BY v1 DESC LIMIT 15",
     $types, $params, 'k', 'v1');
 
+// ── WEIGHT view: records per grouping ────────────────────────────────────────
+$cw_machine = chart_data($conn,
+    "SELECT MACINE_NUMBER AS k, COUNT(*) AS v1 FROM welding WHERE $wsql GROUP BY MACINE_NUMBER ORDER BY v1 DESC LIMIT 15",
+    $types, $params, 'k', 'v1');
+$cw_customer = chart_data($conn,
+    "SELECT INPUT_CUSTOMER AS k, COUNT(*) AS v1 FROM welding WHERE $wsql GROUP BY INPUT_CUSTOMER ORDER BY v1 DESC LIMIT 15",
+    $types, $params, 'k', 'v1');
+$cw_shift = chart_data($conn,
+    "SELECT SHIFT_PERSONNEL_HISTORY AS k, COUNT(*) AS v1 FROM welding WHERE $wsql GROUP BY SHIFT_PERSONNEL_HISTORY ORDER BY v1 DESC LIMIT 15",
+    $types, $params, 'k', 'v1');
+$cw_fabric = chart_data($conn,
+    "SELECT FABRIC_WIDTH_TAPE_DENIER AS k, COUNT(*) AS v1 FROM welding WHERE $wsql GROUP BY FABRIC_WIDTH_TAPE_DENIER ORDER BY v1 DESC LIMIT 10",
+    $types, $params, 'k', 'v1');
+$cw_bagtype = chart_data($conn,
+    "SELECT SUBSTR(BAG_TYPE, 1, 50) AS k, COUNT(*) AS v1 FROM welding WHERE $wsql GROUP BY BAG_TYPE ORDER BY v1 DESC LIMIT 10",
+    $types, $params, 'k', 'v1');
+$cw_jo = chart_data($conn,
+    "SELECT JOB_ORDER_NO AS k, COUNT(*) AS v1 FROM welding WHERE $wsql GROUP BY JOB_ORDER_NO ORDER BY v1 DESC LIMIT 15",
+    $types, $params, 'k', 'v1');
+
 // ── Filter options ────────────────────────────────────────────────────────────
 $opt_months    = $conn->query("SELECT DISTINCT DATE_FORMAT(DATE_COMPLETED, '%Y-%m') AS v, DATE_FORMAT(DATE_COMPLETED, '%M %Y') AS label FROM welding WHERE DATE_COMPLETED IS NOT NULL AND DATE_COMPLETED != '' AND DATE_COMPLETED != '0000-00-00' ORDER BY v DESC");
 $opt_machines  = $conn->query("SELECT DISTINCT MACINE_NUMBER v FROM welding WHERE MACINE_NUMBER IS NOT NULL AND MACINE_NUMBER != '' ORDER BY MACINE_NUMBER");
@@ -145,6 +165,15 @@ require_once __DIR__ . '/../includes/navbar.php';
             <div class="page-subheading mt-1">Output analytics per machine, shift personnel, bag type, fabric, job order, and customer</div>
         </div>
         <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- View Toggle -->
+            <div class="cnv-toggle-wrap">
+                <button type="button" class="cnv-toggle-btn active" id="cnvBtnCounts" onclick="cnvSetView('counts')">
+                    <i class="bi bi-boxes me-1"></i>Counts
+                </button>
+                <button type="button" class="cnv-toggle-btn" id="cnvBtnWeight" onclick="cnvSetView('weight')">
+                    <i class="bi bi-box-seam me-1"></i>Weight
+                </button>
+            </div>
             <span class="badge process-badge" style="background:#052e16;border:1px solid #22c55e;color:#86efac">
                 <i class="bi bi-database me-1"></i>welding
             </span>
@@ -240,26 +269,18 @@ require_once __DIR__ . '/../includes/navbar.php';
                        placeholder="Search bag type..." value="<?= htmlspecialchars($f_bagtype) ?>">
             </div>
             <!-- ── Date Range Filter ───────────────────────────── -->
-            <div class="col-6 col-md-3 col-lg-2">
+            <div class="col-12 col-md-6 col-lg-3">
                 <label class="form-label text-secondary" style="font-size:.72rem">
-                    <i class="bi bi-calendar-range me-1" style="color:#22c55e"></i>DATE FINISHED FROM
+                    <i class="bi bi-calendar-range me-1" style="color:#22c55e"></i>DATE FINISHED RANGE
                 </label>
-                <input type="text" name="date_from" id="date_from"
-                       class="form-control form-control-sm pqm-input pqm-datepicker"
-                       placeholder="Start date"
-                       value="<?= htmlspecialchars($f_date_from) ?>"
+                <input type="hidden" name="date_from" id="cnv_date_from" value="<?= htmlspecialchars($f_date_from) ?>">
+                <input type="hidden" name="date_to"   id="cnv_date_to"   value="<?= htmlspecialchars($f_date_to) ?>">
+                <input type="text" id="cnv_date_range"
+                       class="form-control form-control-sm pqm-input"
+                       placeholder="Start date — End date"
                        autocomplete="off" readonly>
             </div>
-            <div class="col-6 col-md-3 col-lg-2">
-                <label class="form-label text-secondary" style="font-size:.72rem">
-                    <i class="bi bi-calendar-range me-1" style="color:#22c55e"></i>DATE FINISHED TO
-                </label>
-                <input type="text" name="date_to" id="date_to"
-                       class="form-control form-control-sm pqm-input pqm-datepicker"
-                       placeholder="End date"
-                       value="<?= htmlspecialchars($f_date_to) ?>"
-                       autocomplete="off" readonly>
-            </div>
+
             <div class="col-12 d-flex gap-2 mt-1">
                 <button type="submit" class="btn btn-primary btn-sm px-4">
                     <i class="bi bi-search me-1"></i> Apply
@@ -271,19 +292,19 @@ require_once __DIR__ . '/../includes/navbar.php';
         </form>
     </div>
 
-    <!-- KPI Cards -->
-    <div class="row g-3 mb-4">
+    <!-- KPI Cards — COUNTS view (bags output) -->
+    <div class="cnv-view-counts">
+    <div class="row g-2 mb-4 row-cols-2 row-cols-md-3 row-cols-xl-5 cnv-kpi-row">
         <?php
-        $kpis = [
-            ['val' => number_format((int)$kpi['tot_output']),  'label' => 'Total Output (bags)', 'icon' => 'bi-bag-check',       'cls' => 'icon-green'],
-            ['val' => number_format((int)$kpi['recs']),        'label' => 'Total Records',       'icon' => 'bi-collection',      'cls' => 'icon-teal'],
-            ['val' => (int)$kpi['machines'],                   'label' => 'Active Machines',     'icon' => 'bi-cpu',             'cls' => 'icon-blue'],
-            ['val' => (int)$kpi['customers'],                  'label' => 'Customers',           'icon' => 'bi-people',          'cls' => 'icon-amber'],
+        $kpis_counts = [
+            ['val' => number_format((int)$kpi['tot_output']),  'label' => 'Total Output (bags)', 'icon' => 'bi-bag-check',        'cls' => 'icon-green'],
+            ['val' => (int)$kpi['machines'],                   'label' => 'Active Machines',     'icon' => 'bi-cpu',              'cls' => 'icon-blue'],
+            ['val' => (int)$kpi['customers'],                  'label' => 'Customers',           'icon' => 'bi-people',           'cls' => 'icon-amber'],
             ['val' => (int)$kpi['jos'],                        'label' => 'Job Orders',          'icon' => 'bi-file-earmark-text','cls' => 'icon-purple'],
-            ['val' => (int)$kpi['fabrics'],                    'label' => 'Fabric Types',        'icon' => 'bi-layers',          'cls' => 'icon-red'],
+            ['val' => (int)$kpi['fabrics'],                    'label' => 'Fabric Types',        'icon' => 'bi-layers',           'cls' => 'icon-red'],
         ];
-        foreach ($kpis as $k): ?>
-        <div class="col-6 col-xl-2">
+        foreach ($kpis_counts as $k): ?>
+        <div class="col">
             <div class="pqm-card stat-card">
                 <div class="stat-icon <?= $k['cls'] ?>"><i class="<?= $k['icon'] ?>"></i></div>
                 <div>
@@ -295,11 +316,11 @@ require_once __DIR__ . '/../includes/navbar.php';
         <?php endforeach; ?>
     </div>
 
-    <!-- Charts Row 1 — Output per Machine | Output per Customer -->
+    <!-- Charts Row 1 COUNTS — Output per Machine | per Customer -->
     <div class="row g-3 mb-3">
         <div class="col-12 col-lg-8">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-bar-chart-fill"></i> Output per Machine Number</div>
+                <div class="section-title"><i class="bi bi-bar-chart-fill"></i> Output (bags) per Machine Number</div>
                 <div class="chart-wrapper" style="height:270px">
                     <canvas id="cMachine"></canvas>
                 </div>
@@ -307,7 +328,7 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
         <div class="col-12 col-lg-4">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-pie-chart-fill"></i> Output per Customer</div>
+                <div class="section-title"><i class="bi bi-pie-chart-fill"></i> Output (bags) per Customer</div>
                 <div class="chart-wrapper" style="height:270px">
                     <canvas id="cCustomer"></canvas>
                 </div>
@@ -315,11 +336,11 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
     </div>
 
-    <!-- Charts Row 2 — Output per Shift Personnel | Output per Fabric Width-Denier -->
+    <!-- Charts Row 2 COUNTS -->
     <div class="row g-3 mb-3">
         <div class="col-12 col-md-6">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-person-badge"></i> Output per Shift Personnel (Top 15)</div>
+                <div class="section-title"><i class="bi bi-person-badge"></i> Output (bags) per Shift Personnel (Top 15)</div>
                 <div class="chart-wrapper" style="height:270px">
                     <canvas id="cShift"></canvas>
                 </div>
@@ -327,7 +348,7 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
         <div class="col-12 col-md-6">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-grid-3x2-gap"></i> Output per Fabric Width-Denier</div>
+                <div class="section-title"><i class="bi bi-grid-3x2-gap"></i> Output (bags) per Fabric Width-Denier</div>
                 <div class="chart-wrapper" style="height:270px">
                     <canvas id="cFabric"></canvas>
                 </div>
@@ -335,11 +356,11 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
     </div>
 
-    <!-- Charts Row 3 — Output per Bag Type | Output per Job Order -->
+    <!-- Charts Row 3 COUNTS -->
     <div class="row g-3 mb-4">
         <div class="col-12 col-md-5">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-bag"></i> Output per Bag Type (Top 10)</div>
+                <div class="section-title"><i class="bi bi-bag"></i> Output (bags) per Bag Type (Top 10)</div>
                 <div class="chart-wrapper" style="height:260px">
                     <canvas id="cBagType"></canvas>
                 </div>
@@ -347,24 +368,114 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
         <div class="col-12 col-md-7">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-file-earmark-text"></i> Output per Job Order No. (Top 15)</div>
+                <div class="section-title"><i class="bi bi-file-earmark-text"></i> Output (bags) per Job Order No. (Top 15)</div>
                 <div class="chart-wrapper" style="height:260px">
                     <canvas id="cJO"></canvas>
                 </div>
             </div>
         </div>
     </div>
+    </div><!-- /cnv-view-counts -->
+
+    <!-- KPI Cards — WEIGHT view (records count) -->
+    <div class="cnv-view-weight" style="display:none">
+    <div class="row g-2 mb-4 row-cols-2 row-cols-md-3 cnv-kpi-row">
+        <?php
+        $kpis_weight = [
+            ['val' => number_format((int)$kpi['recs']),  'label' => 'Total Records',   'icon' => 'bi-collection', 'cls' => 'icon-teal'],
+            ['val' => (int)$kpi['machines'],             'label' => 'Active Machines', 'icon' => 'bi-cpu',        'cls' => 'icon-blue'],
+            ['val' => (int)$kpi['customers'],            'label' => 'Customers',       'icon' => 'bi-people',     'cls' => 'icon-amber'],
+        ];
+        foreach ($kpis_weight as $k): ?>
+        <div class="col">
+            <div class="pqm-card stat-card">
+                <div class="stat-icon <?= $k['cls'] ?>"><i class="<?= $k['icon'] ?>"></i></div>
+                <div>
+                    <div class="stat-value"><?= $k['val'] ?></div>
+                    <div class="stat-label"><?= $k['label'] ?></div>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+
+    <!-- Charts Row 1 WEIGHT — Records per Machine | per Customer -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-8">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-bar-chart-fill"></i> Production Records per Machine Number</div>
+                <div class="chart-wrapper" style="height:270px">
+                    <canvas id="cwMachine"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-4">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-pie-chart-fill"></i> Records per Customer</div>
+                <div class="chart-wrapper" style="height:270px">
+                    <canvas id="cwCustomer"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row 2 WEIGHT -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-md-6">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-person-badge"></i> Records per Shift Personnel (Top 15)</div>
+                <div class="chart-wrapper" style="height:270px">
+                    <canvas id="cwShift"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-grid-3x2-gap"></i> Records per Fabric Width-Denier</div>
+                <div class="chart-wrapper" style="height:270px">
+                    <canvas id="cwFabric"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row 3 WEIGHT -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-md-5">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-bag"></i> Records per Bag Type (Top 10)</div>
+                <div class="chart-wrapper" style="height:260px">
+                    <canvas id="cwBagType"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-7">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-file-earmark-text"></i> Records per Job Order No. (Top 15)</div>
+                <div class="chart-wrapper" style="height:260px">
+                    <canvas id="cwJO"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div><!-- /cnv-view-weight -->
 
     <!-- Production Table -->
     <div class="pqm-card">
         <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
             <div class="section-title mb-0">
                 <i class="bi bi-table"></i> Production Records
-                <span class="text-secondary fw-normal ms-1" style="font-size:.78rem">(latest 50)</span>
+                <span class="ms-1" style="font-size:.75rem;color:#22c55e;"><i class="bi bi-sort-down me-1"></i>Latest first</span>
             </div>
             <div class="d-flex gap-2 align-items-center flex-wrap">
+                <div class="d-flex align-items-center gap-1" style="position:relative;">
                 <input type="text" id="tblSearch" class="form-control form-control-sm pqm-input"
-                       placeholder="&#xF52A; Search..." style="max-width:200px">
+                       placeholder="Search table…" style="max-width:200px;padding-right:2rem;"
+                       oninput="cnvDoSearch(this.value)">
+                <button id="tblSearchClear" onclick="cnvClearSearch()"
+                        style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#94a3b8;cursor:pointer;padding:0;line-height:1;font-size:.85rem;"
+                        title="Clear search"><i class="bi bi-x-circle-fill"></i></button>
+                </div>
                 <a href="conversion_export.php?<?= http_build_query($_GET) ?>"
                    class="btn btn-sm btn-success px-3 d-flex align-items-center gap-1" style="white-space:nowrap">
                     <i class="bi bi-file-earmark-excel"></i> Export Excel
@@ -432,7 +543,7 @@ require_once __DIR__ . '/../includes/navbar.php';
 </div><!-- /main-content -->
 <?php
 $upload_module='conversion';$upload_label='Conversion';
-$upload_sample='FINAL_BATCH_CODE | MACINE_NUMBER | DATE_STARTED | OUTPUT | INPUT_CUSTOMER | BAG_TYPE | JOB_ORDER_NO | ...';
+$upload_sample='No header row needed — upload WELDING.csv directly. Col order: FINAL_BATCH_CODE | Id | ... | MACINE_NUMBER | DATE_STARTED | TIME_STARTED | DATE_COMPLETED | TIME_COMPLETED | BEGINNING_COUNT | END_COUNT | OUTPUT | PRODUCTION_REMARKS | SHIFT_PERSONNEL_HISTORY | TECNICIAN | LEAD_INSPECTOR';
 require_once __DIR__.'/../includes/upload_modal.php';
 ?>
 <script>window._pqmBasePath='<?=$base_path?>';</script>
@@ -445,6 +556,12 @@ const CB  = <?= json_encode($c_bagtype)  ?>;
 const CF  = <?= json_encode($c_fabric)   ?>;
 const CJ  = <?= json_encode($c_jo)       ?>;
 const CU  = <?= json_encode($c_customer) ?>;
+const CWM  = <?= json_encode($cw_machine)  ?>;
+const CWS  = <?= json_encode($cw_shift)    ?>;
+const CWB  = <?= json_encode($cw_bagtype)  ?>;
+const CWF  = <?= json_encode($cw_fabric)   ?>;
+const CWJ  = <?= json_encode($cw_jo)       ?>;
+const CWU  = <?= json_encode($cw_customer) ?>;
 
 // ── Shared dataset builder ─────────────────────────────────────────────────
 function greenDataset(label, data) {
@@ -568,32 +685,83 @@ new Chart(document.getElementById('cJO'), {
     }
 });
 
-// Live table search
-document.getElementById('tblSearch').addEventListener('input', function () {
-    const q = this.value.toLowerCase();
-    document.querySelectorAll('#cTable tbody tr').forEach(tr => {
-        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
-    });
+// ── WEIGHT VIEW CHARTS (Records count) ────────────────────────────────────────
+const cnvTeal = ['#0ea5e9','#22c55e','#a855f7','#f59e0b','#ef4444','#06b6d4','#f97316','#84cc16','#e879f9','#34d399'];
+function cnvTealDS(label, data) {
+    return { label, data, backgroundColor: 'rgba(14,165,233,.75)', borderColor:'#0ea5e9', borderWidth:1, borderRadius:4 };
+}
+new Chart(document.getElementById('cwMachine'), {
+    type:'bar', data:{ labels:CWM.labels, datasets:[cnvTealDS('Records',CWM.v1)] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+        scales:{ x:{grid:{color:PQM_COLORS.grid},ticks:{color:'#94a3b8'}}, y:{grid:{color:PQM_COLORS.grid},beginAtZero:true,ticks:{color:'#94a3b8'}} } }
+});
+new Chart(document.getElementById('cwCustomer'), {
+    type:'doughnut', data:{ labels:CWU.labels, datasets:[{data:CWU.v1,backgroundColor:cnvTeal,borderWidth:2,borderColor:'#162032',hoverOffset:8}]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{position:'right',labels:{boxWidth:12,padding:8,color:'#94a3b8'}} }, cutout:'60%' }
+});
+new Chart(document.getElementById('cwShift'), {
+    type:'bar', data:{ labels:CWS.labels, datasets:[cnvTealDS('Records',CWS.v1)] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+        scales:{ x:{grid:{color:PQM_COLORS.grid},beginAtZero:true,ticks:{color:'#94a3b8'}}, y:{grid:{color:PQM_COLORS.grid},ticks:{color:'#94a3b8',font:{size:10}}} } }
+});
+new Chart(document.getElementById('cwFabric'), {
+    type:'bar', data:{ labels:CWF.labels, datasets:[cnvTealDS('Records',CWF.v1)] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+        scales:{ x:{grid:{color:PQM_COLORS.grid},beginAtZero:true,ticks:{color:'#94a3b8'}}, y:{grid:{color:PQM_COLORS.grid},ticks:{color:'#94a3b8'}} } }
+});
+new Chart(document.getElementById('cwBagType'), {
+    type:'bar', data:{ labels:CWB.labels, datasets:[cnvTealDS('Records',CWB.v1)] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+        scales:{ x:{grid:{color:PQM_COLORS.grid},beginAtZero:true,ticks:{color:'#94a3b8'}}, y:{grid:{color:PQM_COLORS.grid},ticks:{color:'#94a3b8',font:{size:10}}} } }
+});
+new Chart(document.getElementById('cwJO'), {
+    type:'bar', data:{ labels:CWJ.labels, datasets:[cnvTealDS('Records',CWJ.v1)] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+        scales:{ x:{grid:{color:PQM_COLORS.grid},ticks:{color:'#94a3b8'}}, y:{grid:{color:PQM_COLORS.grid},beginAtZero:true,ticks:{color:'#94a3b8'}} } }
 });
 
-// ── Date Range Pickers (Flatpickr) ────────────────────────────────────────────
+// ── TOGGLE ─────────────────────────────────────────────────────────────────────
+function cnvSetView(v) {
+    document.querySelectorAll('.cnv-view-counts').forEach(el => el.style.display = v === 'counts' ? '' : 'none');
+    document.querySelectorAll('.cnv-view-weight').forEach(el => el.style.display = v === 'weight' ? '' : 'none');
+    document.getElementById('cnvBtnCounts').classList.toggle('active', v === 'counts');
+    document.getElementById('cnvBtnWeight').classList.toggle('active', v === 'weight');
+    localStorage.setItem('cnvView', v);
+}
+(function(){ const v = localStorage.getItem('cnvView'); if (v) cnvSetView(v); })();
+
+// Live table search
+function cnvDoSearch(q) {
+    const term = q.trim().toLowerCase();
+    document.querySelectorAll('#cTable tbody tr').forEach(tr => {
+        const text = Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()).join(' ').toLowerCase();
+        tr.style.display = (term === '' || text.includes(term)) ? '' : 'none';
+    });
+    const clearBtn = document.getElementById('tblSearchClear');
+    if (clearBtn) clearBtn.style.display = q.trim() ? 'flex' : 'none';
+}
+function cnvClearSearch() {
+    const input = document.getElementById('tblSearch');
+    input.value = '';
+    cnvDoSearch('');
+    input.focus();
+}
+(function(){ const v = document.getElementById('tblSearch').value; if (v) cnvDoSearch(v); })();
+
+// ── Date Range Picker (Flatpickr range mode) ────────────────
 (function initDatePickers() {
-    // Dynamically load Flatpickr if not already present
     function loadFlatpickr(cb) {
         if (window.flatpickr) { cb(); return; }
         const link = document.createElement('link');
         link.rel  = 'stylesheet';
         link.href = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css';
         document.head.appendChild(link);
-
         const script = document.createElement('script');
         script.src = 'https://cdn.jsdelivr.net/npm/flatpickr';
         script.onload = cb;
         document.head.appendChild(script);
     }
-
     loadFlatpickr(function () {
-        // Apply dark theme overrides to match .pqm-input style
         const style = document.createElement('style');
         style.textContent = `
             .flatpickr-calendar {
@@ -611,14 +779,11 @@ document.getElementById('tblSearch').addEventListener('input', function () {
             .flatpickr-day.selected,
             .flatpickr-day.startRange,
             .flatpickr-day.endRange {
-                background: #22c55e !important;
-                border-color: #22c55e !important;
-                color: #052e16 !important;
-                font-weight: 700 !important;
+                background: #22c55e !important; border-color: #22c55e !important;
+                color: #052e16 !important; font-weight: 700 !important;
             }
             .flatpickr-day.inRange {
-                background: rgba(34,197,94,.15) !important;
-                border-color: transparent !important;
+                background: rgba(34,197,94,.15) !important; border-color: transparent !important;
                 box-shadow: -5px 0 0 rgba(34,197,94,.15), 5px 0 0 rgba(34,197,94,.15) !important;
             }
             .flatpickr-day.today { border-color: #22c55e !important; }
@@ -631,37 +796,34 @@ document.getElementById('tblSearch').addEventListener('input', function () {
             .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #86efac !important; }
             .flatpickr-prev-month:hover svg, .flatpickr-next-month:hover svg { fill: #22c55e !important; }
             .numInputWrapper:hover { background: rgba(34,197,94,.08) !important; }
-        `;
+`;
         document.head.appendChild(style);
 
-        const fromPicker = flatpickr('#date_from', {
-            dateFormat: 'Y-m-d',
-            allowInput: false,
-            disableMobile: true,
-            onChange: function(selectedDates, dateStr) {
-                // Auto-open the "to" picker after selecting from-date
-                if (selectedDates.length > 0) {
-                    toPicker.set('minDate', selectedDates[0]);
-                    setTimeout(() => toPicker.open(), 120);
-                }
-            }
-        });
+        const fromHidden = document.getElementById('cnv_date_from');
+        const toHidden   = document.getElementById('cnv_date_to');
+        const rangeInput = document.getElementById('cnv_date_range');
 
-        const toPicker = flatpickr('#date_to', {
+        if (fromHidden.value && toHidden.value) {
+            rangeInput.value = fromHidden.value + ' — ' + toHidden.value;
+        } else if (fromHidden.value) {
+            rangeInput.value = fromHidden.value;
+        }
+
+        flatpickr(rangeInput, {
+            mode: 'range',
             dateFormat: 'Y-m-d',
             allowInput: false,
             disableMobile: true,
+            defaultDate: [fromHidden.value || null, toHidden.value || null].filter(Boolean),
             onChange: function(selectedDates) {
-                if (selectedDates.length > 0) {
-                    fromPicker.set('maxDate', selectedDates[0]);
-                }
+                fromHidden.value = selectedDates[0] ? selectedDates[0].toISOString().slice(0,10) : '';
+                toHidden.value   = selectedDates[1] ? selectedDates[1].toISOString().slice(0,10) : '';
             }
         });
 
-        // Clear button resets date pickers too
         document.querySelector('a[href="conversion.php"]')?.addEventListener('click', function() {
-            fromPicker.clear();
-            toPicker.clear();
+            fromHidden.value = '';
+            toHidden.value   = '';
         });
     });
 })();
@@ -669,6 +831,45 @@ document.getElementById('tblSearch').addEventListener('input', function () {
 
 <style>
 .icon-green { background: rgba(34,197,94,.18); color: #86efac; }
+/* ── Conversion KPI cards ── */
+.cnv-kpi-row .stat-card {
+    display: flex; align-items: center; gap: .55rem;
+    padding: .75rem .9rem; overflow: hidden;
+}
+.cnv-kpi-row .stat-icon {
+    width: 38px; height: 38px; font-size: 1rem;
+    flex-shrink: 0; border-radius: 10px;
+}
+.cnv-kpi-row .stat-card > div:last-child {
+    min-width: 0; flex: 1; overflow: hidden;
+}
+.cnv-kpi-row .stat-value {
+    font-size: .95rem; font-weight: 700; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cnv-kpi-row .stat-label {
+    font-size: .68rem; color: var(--text-muted); margin-top: .1rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+@media (max-width: 576px) {
+    .cnv-kpi-row .stat-value { font-size: .85rem; }
+    .cnv-kpi-row .stat-icon  { width: 32px; height: 32px; font-size: .9rem; }
+}
+
+.cnv-toggle-wrap {
+    display: flex; background: rgba(15,23,42,.6);
+    border: 1px solid rgba(148,163,184,.15); border-radius: 10px; padding: 3px; gap: 2px;
+}
+.cnv-toggle-btn {
+    padding: 5px 18px; font-size: .8rem; font-weight: 600; border: none; cursor: pointer;
+    border-radius: 8px; background: transparent; color: #64748b;
+    transition: all .2s; letter-spacing: .02em;
+}
+.cnv-toggle-btn.active {
+    background: #052e16; color: #86efac;
+    box-shadow: 0 2px 8px rgba(34,197,94,.25);
+}
+.cnv-toggle-btn:hover:not(.active) { color: #94a3b8; background: rgba(255,255,255,.04); }
 .pqm-input {
     background: #1a3358 !important;
     border: 1px solid rgba(255,255,255,.1) !important;

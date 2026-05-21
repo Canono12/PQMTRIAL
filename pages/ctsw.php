@@ -137,6 +137,55 @@ $c_customer = chart_data_two($conn,
      GROUP BY CUSTOMER ORDER BY v1 DESC LIMIT 15",
     $types, $params, 'k', 'v1', 'v2');
 
+// ── WEIGHT-based chart data ────────────────────────────────────────────────────
+$cw_machine = chart_data_two($conn,
+    "SELECT MACHIN_NUMBER AS k,
+            SUM(CAST(`GOOD_BAGS_IN_WEIGHT` AS DECIMAL(10,2))) AS v1,
+            SUM(CAST(`DEFECTIVE_BAGS(WEIGHT)` AS DECIMAL(10,2))) AS v2
+     FROM ctswtrial WHERE $wsql
+     GROUP BY MACHIN_NUMBER ORDER BY v1 DESC LIMIT 15",
+    $types, $params, 'k', 'v1', 'v2');
+
+$cw_shift = chart_data_two($conn,
+    "SELECT SHIFT_PRODUCTION_PERSONNEL AS k,
+            SUM(CAST(`GOOD_BAGS_IN_WEIGHT` AS DECIMAL(10,2))) AS v1,
+            SUM(CAST(`DEFECTIVE_BAGS(WEIGHT)` AS DECIMAL(10,2))) AS v2
+     FROM ctswtrial WHERE $wsql
+     GROUP BY SHIFT_PRODUCTION_PERSONNEL ORDER BY v1 DESC LIMIT 15",
+    $types, $params, 'k', 'v1', 'v2');
+
+$cw_bagtype = chart_data_two($conn,
+    "SELECT LEFT(BAG_TYPE, 45) AS k,
+            SUM(CAST(`GOOD_BAGS_IN_WEIGHT` AS DECIMAL(10,2))) AS v1,
+            SUM(CAST(`DEFECTIVE_BAGS(WEIGHT)` AS DECIMAL(10,2))) AS v2
+     FROM ctswtrial WHERE $wsql
+     GROUP BY BAG_TYPE ORDER BY v1 DESC LIMIT 10",
+    $types, $params, 'k', 'v1', 'v2');
+
+$cw_fabric = chart_data_two($conn,
+    "SELECT FABRIC_WIDTH_TAPE_DENIER AS k,
+            SUM(CAST(`GOOD_BAGS_IN_WEIGHT` AS DECIMAL(10,2))) AS v1,
+            SUM(CAST(`DEFECTIVE_BAGS(WEIGHT)` AS DECIMAL(10,2))) AS v2
+     FROM ctswtrial WHERE $wsql
+     GROUP BY FABRIC_WIDTH_TAPE_DENIER ORDER BY v1 DESC LIMIT 10",
+    $types, $params, 'k', 'v1', 'v2');
+
+$cw_jo = chart_data_two($conn,
+    "SELECT JOB_ORDER_NUMBER AS k,
+            SUM(CAST(`GOOD_BAGS_IN_WEIGHT` AS DECIMAL(10,2))) AS v1,
+            SUM(CAST(`DEFECTIVE_BAGS(WEIGHT)` AS DECIMAL(10,2))) AS v2
+     FROM ctswtrial WHERE $wsql AND JOB_ORDER_NUMBER IS NOT NULL AND JOB_ORDER_NUMBER != 'N/A'
+     GROUP BY JOB_ORDER_NUMBER ORDER BY v1 DESC LIMIT 15",
+    $types, $params, 'k', 'v1', 'v2');
+
+$cw_customer = chart_data_two($conn,
+    "SELECT CUSTOMER AS k,
+            SUM(CAST(`GOOD_BAGS_IN_WEIGHT` AS DECIMAL(10,2))) AS v1,
+            SUM(CAST(`DEFECTIVE_BAGS(WEIGHT)` AS DECIMAL(10,2))) AS v2
+     FROM ctswtrial WHERE $wsql AND CUSTOMER IS NOT NULL
+     GROUP BY CUSTOMER ORDER BY v1 DESC LIMIT 15",
+    $types, $params, 'k', 'v1', 'v2');
+
 // ── Filter option lists ───────────────────────────────────────────────────────
 $opt_months_raw = $conn->query("SELECT DISTINCT DATE_FORMAT(DATE_FINISHED,'%Y-%m') AS v, DATE_FORMAT(DATE_FINISHED,'%M %Y') AS label FROM ctswtrial WHERE DATE_FINISHED IS NOT NULL AND DATE_FINISHED != '' AND DATE_FINISHED != '0000-00-00' ORDER BY v DESC");
 $opt_months = [];
@@ -176,6 +225,15 @@ require_once __DIR__ . '/../includes/navbar.php';
             <div class="page-subheading mt-1">Output &amp; Waste analytics — Cutting, Sewing &amp; Finishing</div>
         </div>
         <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- View Toggle -->
+            <div class="ctsw-toggle-wrap">
+                <button type="button" class="ctsw-toggle-btn active" id="ctswBtnCounts" onclick="ctswSetView('counts')">
+                    <i class="bi bi-boxes me-1"></i>Counts
+                </button>
+                <button type="button" class="ctsw-toggle-btn" id="ctswBtnWeight" onclick="ctswSetView('weight')">
+                    <i class="bi bi-box-seam me-1"></i>Weight
+                </button>
+            </div>
             <span class="badge process-badge" style="background:#1e3a5f;border:1px solid #3b82f6;color:#93c5fd">
                 <i class="bi bi-database me-1"></i>ctswtrial
             </span>
@@ -201,15 +259,18 @@ require_once __DIR__ . '/../includes/navbar.php';
                 </select>
             </div>
 
-            <div class="col-6 col-md-3 col-lg-2">
-                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED FROM</label>
-                <input type="date" name="date_from" class="form-control form-control-sm pqm-input"
-                       value="<?= htmlspecialchars($f_date_from) ?>">
-            </div>
-            <div class="col-6 col-md-3 col-lg-2">
-                <label class="form-label text-secondary" style="font-size:.72rem">DATE FINISHED TO</label>
-                <input type="date" name="date_to" class="form-control form-control-sm pqm-input"
-                       value="<?= htmlspecialchars($f_date_to) ?>">
+            <!-- ── Date Range Filter ────────────────── -->
+            <div class="col-12 col-md-6 col-lg-3">
+                <label class="form-label text-secondary" style="font-size:.72rem">
+                    <i class="bi bi-calendar-range me-1" style="color:#22c55e"></i>DATE FINISHED RANGE
+                </label>
+                <!-- hidden inputs carry the split values for PHP -->
+                <input type="hidden" name="date_from" id="ctsw_date_from" value="<?= htmlspecialchars($f_date_from) ?>">
+                <input type="hidden" name="date_to"   id="ctsw_date_to"   value="<?= htmlspecialchars($f_date_to) ?>">
+                <input type="text" id="ctsw_date_range"
+                       class="form-control form-control-sm pqm-input"
+                       placeholder="Start date — End date"
+                       autocomplete="off" readonly>
             </div>
             <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label text-secondary" style="font-size:.72rem">MACHINE</label>
@@ -276,8 +337,8 @@ require_once __DIR__ . '/../includes/navbar.php';
                     <?php endwhile; ?>
                 </select>
             </div>
-            <div class="col-12 col-lg-2 d-flex gap-2">
-                <button type="submit" class="btn btn-primary btn-sm px-4">
+            <div class="col-auto d-flex gap-2 align-items-end">
+                <button type="submit" class="btn btn-primary btn-sm px-3">
                     <i class="bi bi-search me-1"></i> Apply
                 </button>
                 <a href="ctsw.php" class="btn btn-outline-secondary btn-sm px-3">
@@ -287,21 +348,19 @@ require_once __DIR__ . '/../includes/navbar.php';
         </form>
     </div>
 
-    <!-- KPI Cards -->
-    <div class="row g-3 mb-4">
+    <!-- KPI Cards — COUNTS view -->
+    <div class="ctsw-view-counts">
+    <div class="row g-2 mb-4 row-cols-2 row-cols-md-3 row-cols-xl-5 ctsw-kpi-row">
         <?php
-        $kpis = [
-            ['val' => number_format((int)$kpi['tot_good_count']),              'label' => 'Good Bags (count)',     'icon' => 'bi-bag-check-fill',  'cls' => 'icon-blue'],
-            ['val' => number_format((float)$kpi['tot_good_weight'], 1).' kg',  'label' => 'Good Bags (weight)',    'icon' => 'bi-speedometer2',    'cls' => 'icon-green'],
-            ['val' => number_format((int)$kpi['tot_def_count']),               'label' => 'Defective Bags (count)','icon' => 'bi-bag-x-fill',      'cls' => 'icon-amber'],
-            ['val' => number_format((float)$kpi['tot_def_weight'], 2).' kg',   'label' => 'Defective Bags (wt)',   'icon' => 'bi-exclamation-triangle','cls' => 'icon-red'],
-            ['val' => number_format((float)$kpi['tot_waste'], 2).' kg',        'label' => 'Total Waste (kg)',      'icon' => 'bi-slash-circle',    'cls' => 'icon-purple'],
-            ['val' => (int)$kpi['machines'],                                   'label' => 'Active Machines',       'icon' => 'bi-cpu',             'cls' => 'icon-teal'],
-            ['val' => (int)$kpi['customers'],                                  'label' => 'Customers',             'icon' => 'bi-people-fill',     'cls' => 'icon-blue'],
-            ['val' => number_format((int)$kpi['recs']),                        'label' => 'Total Records',         'icon' => 'bi-collection',      'cls' => 'icon-green'],
+        $kpis_counts = [
+            ['val' => number_format((int)$kpi['tot_good_count']),  'label' => 'Good Bags (count)',      'icon' => 'bi-bag-check-fill', 'cls' => 'icon-blue'],
+            ['val' => number_format((int)$kpi['tot_def_count']),   'label' => 'Defective Bags (count)', 'icon' => 'bi-bag-x-fill',     'cls' => 'icon-amber'],
+            ['val' => (int)$kpi['machines'],                       'label' => 'Active Machines',        'icon' => 'bi-cpu',            'cls' => 'icon-teal'],
+            ['val' => (int)$kpi['customers'],                      'label' => 'Customers',              'icon' => 'bi-people-fill',    'cls' => 'icon-purple'],
+            ['val' => number_format((int)$kpi['recs']),            'label' => 'Total Records',          'icon' => 'bi-collection',     'cls' => 'icon-green'],
         ];
-        foreach ($kpis as $k): ?>
-        <div class="col-6 col-xl-3">
+        foreach ($kpis_counts as $k): ?>
+        <div class="col">
             <div class="pqm-card stat-card">
                 <div class="stat-icon <?= $k['cls'] ?>"><i class="<?= $k['icon'] ?>"></i></div>
                 <div>
@@ -313,11 +372,11 @@ require_once __DIR__ . '/../includes/navbar.php';
         <?php endforeach; ?>
     </div>
 
-    <!-- Charts Row 1 — Output/Waste per Machine | per Customer -->
+    <!-- Charts Row 1 COUNTS -->
     <div class="row g-3 mb-3">
         <div class="col-12 col-lg-7">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-bar-chart-fill"></i> Output &amp; Waste per Machine Number</div>
+                <div class="section-title"><i class="bi bi-bar-chart-fill"></i> Good &amp; Defective Bags (count) per Machine</div>
                 <div class="chart-wrapper" style="height:270px">
                     <canvas id="cMachine"></canvas>
                 </div>
@@ -325,7 +384,7 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
         <div class="col-12 col-lg-5">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-pie-chart-fill"></i> Output per Customer</div>
+                <div class="section-title"><i class="bi bi-pie-chart-fill"></i> Good Bags (count) per Customer</div>
                 <div class="chart-wrapper" style="height:270px">
                     <canvas id="cCustomer"></canvas>
                 </div>
@@ -333,11 +392,11 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
     </div>
 
-    <!-- Charts Row 2 — Output/Waste per Shift | per Fabric Width-Denier -->
+    <!-- Charts Row 2 COUNTS -->
     <div class="row g-3 mb-3">
         <div class="col-12 col-md-6">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-person-badge"></i> Output &amp; Waste per Shift / Production Personnel</div>
+                <div class="section-title"><i class="bi bi-person-badge"></i> Good &amp; Defective (count) per Shift Personnel</div>
                 <div class="chart-wrapper" style="height:265px">
                     <canvas id="cShift"></canvas>
                 </div>
@@ -345,7 +404,7 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
         <div class="col-12 col-md-6">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-grid-3x2-gap"></i> Output &amp; Waste per Fabric Width-Denier</div>
+                <div class="section-title"><i class="bi bi-grid-3x2-gap"></i> Good &amp; Defective (count) per Fabric Width-Denier</div>
                 <div class="chart-wrapper" style="height:265px">
                     <canvas id="cFabric"></canvas>
                 </div>
@@ -353,11 +412,11 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
     </div>
 
-    <!-- Charts Row 3 — Output/Waste per Bag Type | per JO -->
+    <!-- Charts Row 3 COUNTS -->
     <div class="row g-3 mb-4">
         <div class="col-12 col-lg-6">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-bag-fill"></i> Output &amp; Waste per Bag Type</div>
+                <div class="section-title"><i class="bi bi-bag-fill"></i> Good &amp; Defective (count) per Bag Type</div>
                 <div class="chart-wrapper" style="height:280px">
                     <canvas id="cBagType"></canvas>
                 </div>
@@ -365,23 +424,123 @@ require_once __DIR__ . '/../includes/navbar.php';
         </div>
         <div class="col-12 col-lg-6">
             <div class="pqm-card h-100">
-                <div class="section-title"><i class="bi bi-graph-up"></i> Output &amp; Waste per JO / Job Order Number</div>
+                <div class="section-title"><i class="bi bi-graph-up"></i> Good &amp; Defective (count) per Job Order</div>
                 <div class="chart-wrapper" style="height:280px">
                     <canvas id="cJO"></canvas>
                 </div>
             </div>
         </div>
     </div>
+    </div><!-- /ctsw-view-counts -->
+
+    <!-- KPI Cards — WEIGHT view -->
+    <div class="ctsw-view-weight" style="display:none">
+    <div class="row g-2 mb-4 row-cols-2 row-cols-md-3 row-cols-xl-5 ctsw-kpi-row">
+        <?php
+        $kpis_weight = [
+            ['val' => number_format((float)$kpi['tot_good_weight'], 1).' kg',  'label' => 'Good Bags (weight)',    'icon' => 'bi-speedometer2',        'cls' => 'icon-green'],
+            ['val' => number_format((float)$kpi['tot_def_weight'], 2).' kg',   'label' => 'Defective Bags (wt)',   'icon' => 'bi-exclamation-triangle', 'cls' => 'icon-red'],
+            ['val' => number_format((float)$kpi['tot_waste'], 2).' kg',        'label' => 'Total Waste (kg)',      'icon' => 'bi-slash-circle',         'cls' => 'icon-purple'],
+            ['val' => (int)$kpi['machines'],                                   'label' => 'Active Machines',       'icon' => 'bi-cpu',                  'cls' => 'icon-teal'],
+            ['val' => (int)$kpi['customers'],                                  'label' => 'Customers',             'icon' => 'bi-people-fill',          'cls' => 'icon-blue'],
+        ];
+        foreach ($kpis_weight as $k): ?>
+        <div class="col">
+            <div class="pqm-card stat-card">
+                <div class="stat-icon <?= $k['cls'] ?>"><i class="<?= $k['icon'] ?>"></i></div>
+                <div>
+                    <div class="stat-value"><?= $k['val'] ?></div>
+                    <div class="stat-label"><?= $k['label'] ?></div>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+
+    <!-- Charts Row 1 WEIGHT -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-7">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-bar-chart-fill"></i> Good &amp; Defective Bags (kg) per Machine</div>
+                <div class="chart-wrapper" style="height:270px">
+                    <canvas id="cwMachine"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-5">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-pie-chart-fill"></i> Good Bags (kg) per Customer</div>
+                <div class="chart-wrapper" style="height:270px">
+                    <canvas id="cwCustomer"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row 2 WEIGHT -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-md-6">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-person-badge"></i> Good &amp; Defective (kg) per Shift Personnel</div>
+                <div class="chart-wrapper" style="height:265px">
+                    <canvas id="cwShift"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-grid-3x2-gap"></i> Good &amp; Defective (kg) per Fabric Width-Denier</div>
+                <div class="chart-wrapper" style="height:265px">
+                    <canvas id="cwFabric"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row 3 WEIGHT -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-lg-6">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-bag-fill"></i> Good &amp; Defective (kg) per Bag Type</div>
+                <div class="chart-wrapper" style="height:280px">
+                    <canvas id="cwBagType"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-6">
+            <div class="pqm-card h-100">
+                <div class="section-title"><i class="bi bi-graph-up"></i> Good &amp; Defective (kg) per Job Order</div>
+                <div class="chart-wrapper" style="height:280px">
+                    <canvas id="cwJO"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div><!-- /ctsw-view-weight -->
+
  <!-- Production Table -->
     <div class="pqm-card">
         <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
             <div class="section-title mb-0">
                 <i class="bi bi-table"></i> Production Records
-                <span class="text-secondary fw-normal ms-1" style="font-size:.78rem">(latest 50)</span>
+                <span class="ms-1" style="font-size:.75rem;color:#22c55e;"><i class="bi bi-sort-down me-1"></i>Latest first</span>
+                <span class="badge ms-2" style="background:rgba(59,130,246,.15);color:#93c5fd;font-size:.75rem;" id="ctswRowCount">
+                    <?= number_format($kpi['recs']) ?> records
+                </span>
             </div>
             <div class="d-flex gap-2 align-items-center flex-wrap">
+                <div class="d-flex align-items-center gap-1" style="position:relative;">
                 <input type="text" id="tblSearch" class="form-control form-control-sm pqm-input"
-                       placeholder="&#xF52A; Search..." style="max-width:200px">
+                       placeholder="Search table…" style="max-width:200px;padding-right:2rem;"
+                       oninput="ctswDoSearch(this.value)">
+                <button id="tblSearchClear" onclick="ctswClearSearch()"
+                        style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#94a3b8;cursor:pointer;padding:0;line-height:1;font-size:.85rem;"
+                        title="Clear search"><i class="bi bi-x-circle-fill"></i></button>
+                </div>
+                <a href="#" class="pqm-upload-trigger-btn" data-bs-toggle="modal" data-bs-target="#uploadModal_ctsw"
+                   style="white-space:nowrap;">
+                    <i class="bi bi-file-earmark-excel"></i> Add Data
+                </a>
                 <a href="ctsw_export.php?<?= http_build_query($_GET) ?>"
                    class="btn btn-sm btn-success px-3 d-flex align-items-center gap-1" style="white-space:nowrap">
                     <i class="bi bi-file-earmark-excel"></i> Export Excel
@@ -531,6 +690,12 @@ const CBT = <?= json_encode($c_bagtype)  ?>;
 const CF  = <?= json_encode($c_fabric)   ?>;
 const CJO = <?= json_encode($c_jo)       ?>;
 const CCU = <?= json_encode($c_customer) ?>;
+const CWM  = <?= json_encode($cw_machine)  ?>;
+const CWSH = <?= json_encode($cw_shift)    ?>;
+const CWBT = <?= json_encode($cw_bagtype)  ?>;
+const CWF  = <?= json_encode($cw_fabric)   ?>;
+const CWJO = <?= json_encode($cw_jo)       ?>;
+const CWCU = <?= json_encode($cw_customer) ?>;
 
 const goodColor = PQM_COLORS.blue  || '#3b82f6';
 const defColor  = PQM_COLORS.amber || '#f59e0b';
@@ -600,19 +765,240 @@ new Chart(document.getElementById('cCustomer'), {
     }
 });
 
-// Live table search
-document.getElementById('tblSearch').addEventListener('input', function(){
-    const q = this.value.toLowerCase();
-    document.querySelectorAll('#ctswTable tbody tr').forEach(tr => {
-        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+// ── WEIGHT VIEW CHARTS ─────────────────────────────────────────────────────────
+function makeWeightBar(canvasId, data, label1, label2, indexAxis = 'x') {
+    new Chart(document.getElementById(canvasId), {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [
+                barDataset(label1, data.v1, PQM_COLORS.green  || '#22c55e'),
+                barDataset(label2, data.v2, PQM_COLORS.red    || '#ef4444'),
+            ]
+        },
+        options: {
+            indexAxis,
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 800 },
+            plugins: { legend: { position: 'top' } },
+            scales: {
+                x: { grid: { color: PQM_COLORS.grid }, beginAtZero: true,
+                     ticks: { color: '#94a3b8', callback: v => v.toLocaleString() + ' kg' } },
+                y: { grid: { color: PQM_COLORS.grid }, ticks: { color: '#94a3b8' } }
+            }
+        }
     });
+}
+
+makeWeightBar('cwMachine',  CWM,  'Good Bags (kg)', 'Defective (kg)');
+makeWeightBar('cwShift',    CWSH, 'Good Bags (kg)', 'Defective (kg)', 'y');
+makeWeightBar('cwBagType',  CWBT, 'Good Bags (kg)', 'Defective (kg)', 'y');
+makeWeightBar('cwFabric',   CWF,  'Good Bags (kg)', 'Defective (kg)', 'y');
+makeWeightBar('cwJO',       CWJO, 'Good Bags (kg)', 'Defective (kg)');
+
+new Chart(document.getElementById('cwCustomer'), {
+    type: 'doughnut',
+    data: {
+        labels: CWCU.labels,
+        datasets: [{
+            data: CWCU.v1,
+            backgroundColor: ['#22c55e','#3b82f6','#f59e0b','#a855f7','#ef4444','#06b6d4','#f97316','#84cc16','#ec4899','#14b8a6','#8b5cf6','#f43f5e','#d97706','#0284c7','#34d399'],
+            borderWidth: 2,
+            borderColor: '#162032',
+            hoverOffset: 8
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { animateRotate: true, duration: 900 },
+        plugins: {
+            legend: { position: 'right', labels: { boxWidth: 12, padding: 8 } },
+            tooltip: { callbacks: { label: ctx => ctx.label + ': ' + ctx.parsed.toLocaleString() + ' kg' } }
+        },
+        cutout: '60%'
+    }
 });
+
+// ── TOGGLE ─────────────────────────────────────────────────────────────────────
+function ctswSetView(v) {
+    document.querySelectorAll('.ctsw-view-counts').forEach(el => el.style.display = v === 'counts' ? '' : 'none');
+    document.querySelectorAll('.ctsw-view-weight').forEach(el => el.style.display = v === 'weight' ? '' : 'none');
+    document.getElementById('ctswBtnCounts').classList.toggle('active', v === 'counts');
+    document.getElementById('ctswBtnWeight').classList.toggle('active', v === 'weight');
+    localStorage.setItem('ctswView', v);
+}
+(function(){ const v = localStorage.getItem('ctswView'); if (v) ctswSetView(v); })();
+
+// Live table search
+function ctswDoSearch(q) {
+    const term = q.trim().toLowerCase();
+    let visibleCount = 0;
+    document.querySelectorAll('#ctswTable tbody tr').forEach(tr => {
+        const text = Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()).join(' ').toLowerCase();
+        const match = term === '' || text.includes(term);
+        tr.style.display = match ? '' : 'none';
+        if (match) visibleCount++;
+    });
+    const clearBtn = document.getElementById('tblSearchClear');
+    if (clearBtn) clearBtn.style.display = q.trim() ? 'flex' : 'none';
+    const countEl = document.getElementById('ctswRowCount');
+    if (countEl) countEl.textContent = term ? visibleCount + ' result' + (visibleCount !== 1 ? 's' : '') : '<?= number_format($kpi["recs"]) ?> records';
+}
+function ctswClearSearch() {
+    const input = document.getElementById('tblSearch');
+    input.value = '';
+    ctswDoSearch('');
+    input.focus();
+}
+(function(){ const v = document.getElementById('tblSearch').value; if (v) ctswDoSearch(v); })();
+
+// ── Date Range Picker (Flatpickr range mode) ────────────────
+(function initDatePickers() {
+    function loadFlatpickr(cb) {
+        if (window.flatpickr) { cb(); return; }
+        const link = document.createElement('link');
+        link.rel  = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css';
+        document.head.appendChild(link);
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/flatpickr';
+        script.onload = cb;
+        document.head.appendChild(script);
+    }
+    loadFlatpickr(function () {
+        const style = document.createElement('style');
+        style.textContent = `
+            .flatpickr-calendar {
+                background: #1a3358 !important;
+                border: 1px solid rgba(34,197,94,.35) !important;
+                box-shadow: 0 8px 32px rgba(0,0,0,.5) !important;
+                border-radius: 10px !important;
+                font-family: inherit !important;
+            }
+            .flatpickr-months .flatpickr-month,
+            .flatpickr-weekdays,
+            span.flatpickr-weekday { background: #1a3358 !important; color: #86efac !important; }
+            .flatpickr-day { color: #f1f5f9 !important; border-radius: 6px !important; }
+            .flatpickr-day:hover { background: rgba(34,197,94,.2) !important; border-color: #22c55e !important; }
+            .flatpickr-day.selected,
+            .flatpickr-day.startRange,
+            .flatpickr-day.endRange {
+                background: #22c55e !important; border-color: #22c55e !important;
+                color: #052e16 !important; font-weight: 700 !important;
+            }
+            .flatpickr-day.inRange {
+                background: rgba(34,197,94,.15) !important; border-color: transparent !important;
+                box-shadow: -5px 0 0 rgba(34,197,94,.15), 5px 0 0 rgba(34,197,94,.15) !important;
+            }
+            .flatpickr-day.today { border-color: #22c55e !important; }
+            .flatpickr-day.flatpickr-disabled { color: #334155 !important; }
+            .flatpickr-current-month input.cur-year,
+            .flatpickr-current-month .flatpickr-monthDropdown-months {
+                color: #f1f5f9 !important; background: transparent !important;
+            }
+            .flatpickr-monthDropdown-months option { background: #1a3358 !important; }
+            .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: #86efac !important; }
+            .flatpickr-prev-month:hover svg, .flatpickr-next-month:hover svg { fill: #22c55e !important; }
+            .numInputWrapper:hover { background: rgba(34,197,94,.08) !important; }
+`;
+        document.head.appendChild(style);
+
+        const fromHidden  = document.getElementById('ctsw_date_from');
+        const toHidden    = document.getElementById('ctsw_date_to');
+        const rangeInput  = document.getElementById('ctsw_date_range');
+
+        // Pre-fill display input from hidden values on page load
+        if (fromHidden.value && toHidden.value) {
+            rangeInput.value = fromHidden.value + ' — ' + toHidden.value;
+        } else if (fromHidden.value) {
+            rangeInput.value = fromHidden.value;
+        }
+
+        flatpickr(rangeInput, {
+            mode: 'range',
+            dateFormat: 'Y-m-d',
+            allowInput: false,
+            disableMobile: true,
+            defaultDate: [
+                fromHidden.value || null,
+                toHidden.value   || null
+            ].filter(Boolean),
+            onChange: function(selectedDates) {
+                fromHidden.value = selectedDates[0] ? selectedDates[0].toISOString().slice(0,10) : '';
+                toHidden.value   = selectedDates[1] ? selectedDates[1].toISOString().slice(0,10) : '';
+            }
+        });
+
+        // Clear button resets date pickers
+        document.querySelector('a[href="ctsw.php"]')?.addEventListener('click', function() {
+            fromHidden.value = '';
+            toHidden.value   = '';
+        });
+    });
+})();
 </script>
 
 <style>
 .icon-teal   { background: rgba(20,184,166,.18); color: #2dd4bf; }
 .icon-amber  { background: rgba(245,158,11,.18);  color: #fbbf24; }
 .icon-purple { background: rgba(168,85,247,.18);  color: #c084fc; }
+
+/* ── CTSW KPI card responsive fix ── */
+.ctsw-kpi-row .stat-card {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    padding: .75rem .9rem;
+    overflow: hidden;
+}
+.ctsw-kpi-row .stat-icon {
+    width: 38px; height: 38px;
+    font-size: 1rem;
+    flex-shrink: 0;
+    border-radius: 10px;
+}
+.ctsw-kpi-row .stat-card > div:last-child {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+}
+.ctsw-kpi-row .stat-value {
+    font-size: .95rem;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ctsw-kpi-row .stat-label {
+    font-size: .68rem;
+    color: var(--text-muted);
+    margin-top: .1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+@media (max-width: 576px) {
+    .ctsw-kpi-row .stat-value { font-size: .85rem; }
+    .ctsw-kpi-row .stat-icon  { width: 32px; height: 32px; font-size: .9rem; }
+}
+
+.ctsw-toggle-wrap {
+    display: flex; background: rgba(15,23,42,.6);
+    border: 1px solid rgba(148,163,184,.15); border-radius: 10px; padding: 3px; gap: 2px;
+}
+.ctsw-toggle-btn {
+    padding: 5px 18px; font-size: .8rem; font-weight: 600; border: none; cursor: pointer;
+    border-radius: 8px; background: transparent; color: #64748b;
+    transition: all .2s; letter-spacing: .02em;
+}
+.ctsw-toggle-btn.active {
+    background: #1e3a5f; color: #93c5fd;
+    box-shadow: 0 2px 8px rgba(59,130,246,.25);
+}
+.ctsw-toggle-btn:hover:not(.active) { color: #94a3b8; background: rgba(255,255,255,.04); }
 .pqm-input {
     background: #1a3358 !important;
     border: 1px solid rgba(255,255,255,.1) !important;

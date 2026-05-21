@@ -255,6 +255,7 @@ function pqmDoUpload(mod) {
                         ? '<br><small style="color:#fbbf24">Row errors: ' + res.errors.join('<br>') + '</small>'
                         : ''),
                     true);
+                setTimeout(() => location.reload(), 1500);
             } else {
                 // Detect wrong format errors
                 const isFormat = (res.message || '').toUpperCase().includes('WRONG FORMAT') ||
@@ -285,7 +286,7 @@ function pqmShowResult(mod, success, html, reload) {
     el.className = success ? 'pqm-upload-result-ok mt-3' : 'pqm-upload-result-err mt-3';
     el.innerHTML = '<div style="font-size:.87rem;">' + html + '</div>' +
         (success && reload
-            ? '<div class="mt-2"><a href="javascript:location.reload()" style="color:#86efac;font-size:.78rem;"><i class="bi bi-arrow-clockwise me-1"></i>Refresh page to see new data</a></div>'
+            ? '<div class="mt-2" style="color:#86efac;font-size:.78rem;"><i class="bi bi-arrow-clockwise me-1"></i>Refreshing page…</div>'
             : '');
 }
 </script>

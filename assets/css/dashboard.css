@@ -261,3 +261,10 @@ body {
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--navy-light); border-radius: 10px; }
+
+
+#lam_date_range {
+    color: white;
+    background: #1e3a5f;
+    border: 1px solid #4a6fa5;
+}

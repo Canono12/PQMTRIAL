@@ -5,7 +5,7 @@ require_once __DIR__ . '/includes/db.php';
 
 // --- Processes in correct order ---
 $processes = [
-    'extrusion'  => ['label' => 'Extrusion',  'table' => null,                    'icon' => 'bi-fire',             'color' => 'icon-orange'],
+    'extrusion'  => ['label' => 'Extrusion',  'table' => 'extrusion',             'icon' => 'bi-fire',             'color' => 'icon-orange'],
     'weaving'    => ['label' => 'Weaving',    'table' => 'weaving',               'icon' => 'bi-diagram-3',        'color' => 'icon-blue'],
     'lamination' => ['label' => 'Lamination', 'table' => 'laminationimport_fixed', 'icon' => 'bi-layers',           'color' => 'icon-teal'],
     'printing'   => ['label' => 'Printing',   'table' => 'printing',               'icon' => 'bi-printer',          'color' => 'icon-green'],
@@ -31,7 +31,8 @@ foreach ($processes as $key => $proc) {
     if ($proc['table'] === null) {
         $stats[$key] = 0;
     } else {
-        $r = $conn->query("SELECT COUNT(*) AS total FROM `{$proc['table']}`");
+        $where = $key === 'extrusion' ? " WHERE `date` != '0000-00-00'" : '';
+        $r = $conn->query("SELECT COUNT(*) AS total FROM `{$proc['table']}`$where");
         $stats[$key] = $r ? (int)$r->fetch_assoc()['total'] : 0;
     }
 }
